@@ -2,29 +2,27 @@ const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const os = require('os');
 
 const isDev = process.env.NODE_ENV === 'development';
 
 function createWindow() {
   const win = new BrowserWindow({
-    width: 1100,
-    height: 750,
-    minWidth: 800,
+    width: 1200,
+    height: 800,
+    minWidth: 900,
     minHeight: 600,
-    backgroundColor: '#0f1117',
-    titleBarStyle: 'hiddenInset',
+    backgroundColor: '#0d0f14',
     frame: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
     },
-    icon: path.join(__dirname, '../../public/icon.png'),
   });
 
   if (isDev) {
     win.loadURL('http://localhost:5173');
-    win.webContents.openDevTools();
   } else {
     win.loadFile(path.join(__dirname, '../../dist/index.html'));
   }
@@ -45,106 +43,250 @@ app.on('window-all-closed', () => {
 
 // ── IPC: Pick folder ──────────────────────────────────────────────────────────
 ipcMain.handle('dialog:openFolder', async () => {
-  const result = await dialog.showOpenDialog({ properties: ['openDirectory', 'multiSelections'] });
+  const result = await dialog.showOpenDialog({
+    properties: ['openDirectory', 'multiSelections'],
+  });
   return result.canceled ? [] : result.filePaths;
 });
 
-// ── IPC: Scan for duplicates ──────────────────────────────────────────────────
-ipcMain.handle('scan:start', async (event, { folders, filters }) => {
-  const win = BrowserWindow.getFocusedWindow();
-  const fileMap = new Map(); // hash -> [filePaths]
-  let scanned = 0;
+// ── IPC: Get network/drive locations ─────────────────────────────────────────
+ipcMain.handle('fs:getLocations', async () => {
+  const locations = [];
 
-  const SUPPORTED_EXTS = new Set([
-    '.jpg', '.jpeg', '.png', '.gif', '.heic', '.raw', '.bmp', '.webp',
-    '.mp3', '.aac', '.flac', '.wav', '.ogg', '.m4a',
-    '.mp4', '.mov', '.avi', '.mkv', '.wmv',
-    '.pdf', '.docx', '.xlsx', '.pptx', '.doc', '.xls', '.txt',
-    '.zip', '.rar', '.7z',
-    '.eml',
-  ]);
+  // Home directory
+  locations.push({ label: 'Home', path: os.homedir(), icon: 'home' });
 
-  function shouldInclude(filePath, filters) {
-    const ext = path.extname(filePath).toLowerCase();
-    if (!SUPPORTED_EXTS.has(ext)) return false;
-    if (filters.types && filters.types.length > 0) {
-      const typeMap = {
-        photos: ['.jpg','.jpeg','.png','.gif','.heic','.raw','.bmp','.webp'],
-        audio:  ['.mp3','.aac','.flac','.wav','.ogg','.m4a'],
-        video:  ['.mp4','.mov','.avi','.mkv','.wmv'],
-        docs:   ['.pdf','.docx','.xlsx','.pptx','.doc','.xls','.txt'],
-        archives:['.zip','.rar','.7z'],
-      };
-      const allowed = filters.types.flatMap(t => typeMap[t] || []);
-      if (!allowed.includes(ext)) return false;
-    }
-    if (filters.minSize && filters.minSize > 0) {
-      try {
-        const stat = fs.statSync(filePath);
-        if (stat.size < filters.minSize) return false;
-      } catch { return false; }
-    }
-    return true;
+  // Desktop / Documents / Downloads
+  for (const name of ['Desktop', 'Documents', 'Downloads', 'Pictures', 'Music', 'Videos']) {
+    const p = path.join(os.homedir(), name);
+    try {
+      fs.accessSync(p);
+      locations.push({ label: name, path: p, icon: name.toLowerCase() });
+    } catch {}
   }
 
-  function hashFile(filePath) {
-    return new Promise((resolve, reject) => {
-      const hash = crypto.createHash('md5');
-      const stream = fs.createReadStream(filePath);
-      stream.on('data', d => hash.update(d));
-      stream.on('end', () => resolve(hash.digest('hex')));
-      stream.on('error', reject);
-    });
-  }
-
-  async function walkDir(dir, filters) {
-    let entries;
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
-    catch { return; }
-
-    for (const entry of entries) {
-      const fullPath = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        await walkDir(fullPath, filters);
-      } else if (entry.isFile()) {
-        if (!shouldInclude(fullPath, filters)) continue;
-        try {
-          const stat = fs.statSync(fullPath);
-          const hash = await hashFile(fullPath);
-          scanned++;
-          if (!fileMap.has(hash)) fileMap.set(hash, []);
-          fileMap.get(hash).push({
-            path: fullPath,
-            name: entry.name,
-            size: stat.size,
-            modified: stat.mtime.toISOString(),
-            ext: path.extname(fullPath).toLowerCase(),
-          });
-          if (scanned % 50 === 0) {
-            win?.webContents.send('scan:progress', { scanned });
-          }
-        } catch { /* skip unreadable */ }
+  if (process.platform === 'win32') {
+    // Windows: drive letters
+    const { execSync } = require('child_process');
+    try {
+      const out = execSync('wmic logicaldisk get name,drivetype,description /format:csv', { encoding: 'utf8' });
+      for (const line of out.split('\n').slice(2)) {
+        const parts = line.trim().split(',');
+        if (parts.length >= 4) {
+          const [, desc, driveType, name] = parts;
+          if (!name) continue;
+          const drivePath = name.trim() + '\\';
+          const type = parseInt(driveType);
+          let icon = 'drive';
+          if (type === 3) icon = 'hdd';
+          if (type === 4) icon = 'network';
+          if (type === 2) icon = 'usb';
+          if (type === 5) icon = 'disc';
+          locations.push({ label: `${desc.trim() || drivePath} (${drivePath})`, path: drivePath, icon });
+        }
       }
+    } catch {}
+
+    // Windows network shares via net use
+    try {
+      const { execSync } = require('child_process');
+      const netOut = execSync('net use', { encoding: 'utf8' });
+      const lines = netOut.split('\n');
+      for (const line of lines) {
+        const match = line.match(/([A-Z]:)\s+(\\\\\S+)/);
+        if (match) {
+          locations.push({ label: `Network: ${match[2]} (${match[1]})`, path: match[1] + '\\', icon: 'network' });
+        }
+      }
+    } catch {}
+
+  } else {
+    // Linux/macOS: /media and /mnt mounts
+    for (const base of ['/media', '/mnt', '/run/media']) {
+      try {
+        const entries = fs.readdirSync(base, { withFileTypes: true });
+        for (const e of entries) {
+          if (e.isDirectory()) {
+            const mp = path.join(base, e.name);
+            try {
+              // Check if mounted (has content)
+              fs.readdirSync(mp);
+              locations.push({ label: `${e.name} (${mp})`, path: mp, icon: 'usb' });
+            } catch {}
+          }
+        }
+      } catch {}
+    }
+
+    // macOS Volumes
+    if (process.platform === 'darwin') {
+      try {
+        const vols = fs.readdirSync('/Volumes', { withFileTypes: true });
+        for (const v of vols) {
+          if (v.isDirectory() || v.isSymbolicLink()) {
+            locations.push({ label: v.name, path: `/Volumes/${v.name}`, icon: 'drive' });
+          }
+        }
+      } catch {}
+    }
+
+    // Network shares from /etc/fstab
+    try {
+      const fstab = fs.readFileSync('/etc/fstab', 'utf8');
+      for (const line of fstab.split('\n')) {
+        if (line.startsWith('//') || line.startsWith('nfs')) {
+          const parts = line.trim().split(/\s+/);
+          if (parts[1] && parts[1].startsWith('/')) {
+            locations.push({ label: `Network: ${parts[0]} → ${parts[1]}`, path: parts[1], icon: 'network' });
+          }
+        }
+      }
+    } catch {}
+  }
+
+  return locations;
+});
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+const SUPPORTED_EXTS = new Set([
+  '.jpg', '.jpeg', '.png', '.gif', '.heic', '.raw', '.bmp', '.webp',
+  '.mp3', '.aac', '.flac', '.wav', '.ogg', '.m4a',
+  '.mp4', '.mov', '.avi', '.mkv', '.wmv',
+  '.pdf', '.docx', '.xlsx', '.pptx', '.doc', '.xls', '.txt',
+  '.zip', '.rar', '.7z', '.eml',
+]);
+
+const TYPE_MAP = {
+  photos:   ['.jpg','.jpeg','.png','.gif','.heic','.raw','.bmp','.webp'],
+  audio:    ['.mp3','.aac','.flac','.wav','.ogg','.m4a'],
+  video:    ['.mp4','.mov','.avi','.mkv','.wmv'],
+  docs:     ['.pdf','.docx','.xlsx','.pptx','.doc','.xls','.txt'],
+  archives: ['.zip','.rar','.7z'],
+};
+
+function shouldInclude(filePath, filters) {
+  const ext = path.extname(filePath).toLowerCase();
+  if (!SUPPORTED_EXTS.has(ext)) return false;
+  if (filters.types && filters.types.length > 0) {
+    const allowed = filters.types.flatMap(t => TYPE_MAP[t] || []);
+    if (!allowed.includes(ext)) return false;
+  }
+  if (filters.minSize && filters.minSize > 0) {
+    try {
+      if (fs.statSync(filePath).size < filters.minSize) return false;
+    } catch { return false; }
+  }
+  return true;
+}
+
+function hashFile(filePath) {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash('md5');
+    const stream = fs.createReadStream(filePath);
+    stream.on('data', d => hash.update(d));
+    stream.on('end', () => resolve(hash.digest('hex')));
+    stream.on('error', reject);
+  });
+}
+
+async function walkDir(dir, filters, fileMap, label, win, counter) {
+  let entries;
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
+  catch { return; }
+
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      await walkDir(fullPath, filters, fileMap, label, win, counter);
+    } else if (entry.isFile()) {
+      if (!shouldInclude(fullPath, filters)) continue;
+      try {
+        const stat = fs.statSync(fullPath);
+        const hash = await hashFile(fullPath);
+        counter.n++;
+        if (!fileMap.has(hash)) fileMap.set(hash, []);
+        fileMap.get(hash).push({
+          path: fullPath,
+          name: entry.name,
+          size: stat.size,
+          modified: stat.mtime.toISOString(),
+          ext: path.extname(fullPath).toLowerCase(),
+          sourceLabel: label, // 'protected' | 'target'
+        });
+        if (counter.n % 25 === 0) {
+          win?.webContents.send('scan:progress', { scanned: counter.n });
+        }
+      } catch { /* skip unreadable */ }
+    }
+  }
+}
+
+// ── IPC: Scan ─────────────────────────────────────────────────────────────────
+ipcMain.handle('scan:start', async (event, { mode, protectedFolders, targetFolders, filters, autoMarkRule }) => {
+  const win = BrowserWindow.getFocusedWindow();
+  const fileMap = new Map();
+  const counter = { n: 0 };
+
+  if (mode === 'compare') {
+    for (const folder of (protectedFolders || [])) {
+      await walkDir(folder, filters || {}, fileMap, 'protected', win, counter);
+    }
+    for (const folder of (targetFolders || [])) {
+      await walkDir(folder, filters || {}, fileMap, 'target', win, counter);
+    }
+  } else {
+    // simple mode — all folders are targets
+    for (const folder of (targetFolders || [])) {
+      await walkDir(folder, filters || {}, fileMap, 'target', win, counter);
     }
   }
 
-  for (const folder of folders) {
-    await walkDir(folder, filters || {});
-  }
-
-  // Build duplicate groups (only groups with >1 file)
+  // Build groups
   const groups = [];
   let groupId = 0;
   for (const [hash, files] of fileMap.entries()) {
-    if (files.length > 1) {
-      groups.push({ id: groupId++, hash, files });
+    if (files.length < 2) continue;
+
+    const hasProtected = files.some(f => f.sourceLabel === 'protected');
+    const hasTarget    = files.some(f => f.sourceLabel === 'target');
+
+    // In compare mode only show groups that span both zones (or target-only dupes)
+    if (mode === 'compare' && !hasTarget) continue;
+
+    // Apply auto-mark rule
+    let markedPaths = new Set();
+
+    if (mode === 'compare' && hasProtected) {
+      // Protected-wins: always mark target copies that duplicate a protected file
+      files.filter(f => f.sourceLabel === 'target').forEach(f => markedPaths.add(f.path));
+    } else {
+      // Within target-only dupes, apply tiebreak rule
+      let sorted;
+      if (autoMarkRule === 'keep-newest' || autoMarkRule === 'protected-wins') {
+        sorted = [...files].sort((a, b) => new Date(b.modified) - new Date(a.modified));
+      } else if (autoMarkRule === 'keep-oldest') {
+        sorted = [...files].sort((a, b) => new Date(a.modified) - new Date(b.modified));
+      } else if (autoMarkRule === 'keep-largest') {
+        sorted = [...files].sort((a, b) => b.size - a.size);
+      } else {
+        sorted = [...files].sort((a, b) => new Date(b.modified) - new Date(a.modified));
+      }
+      sorted.slice(1).forEach(f => markedPaths.add(f.path));
     }
+
+    groups.push({
+      id: groupId++,
+      hash,
+      files,
+      autoMarked: Array.from(markedPaths),
+      hasProtected,
+    });
   }
 
-  return { groups, totalScanned: scanned };
+  return { groups, totalScanned: counter.n, mode };
 });
 
-// ── IPC: Delete files ─────────────────────────────────────────────────────────
+// ── IPC: Delete ───────────────────────────────────────────────────────────────
 ipcMain.handle('files:delete', async (event, filePaths) => {
   const results = { deleted: [], failed: [] };
   for (const filePath of filePaths) {
@@ -161,16 +303,6 @@ ipcMain.handle('files:delete', async (event, filePaths) => {
     }
   }
   return results;
-});
-
-// ── IPC: Get file stats ────────────────────────────────────────────────────────
-ipcMain.handle('files:stat', async (event, filePath) => {
-  try {
-    const stat = fs.statSync(filePath);
-    return { size: stat.size, modified: stat.mtime.toISOString(), exists: true };
-  } catch {
-    return { exists: false };
-  }
 });
 
 // ── IPC: Window controls ──────────────────────────────────────────────────────
