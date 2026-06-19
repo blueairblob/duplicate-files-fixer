@@ -25,7 +25,7 @@ function fileIcon(ext) {
 }
 
 export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, onBack }) {
-  const { groups = [], totalScanned = 0, mode } = scanResult;
+  const { groups = [], totalScanned = 0, totalHashed = 0, mode, warnings = [] } = scanResult;
   const { autoMarkRule } = scanConfig || {};
 
   // Initialise marked from auto-mark computed in main process
@@ -39,6 +39,7 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
   const [search, setSearch] = useState('');
   const [deleting, setDeleting] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [warningsOpen, setWarningsOpen] = useState(false);
 
   const filteredGroups = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -91,6 +92,16 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
         <div style={{ fontSize: 48 }}>✅</div>
         <h2 style={{ fontSize: 20, fontWeight: 600 }}>No duplicates found</h2>
         <p style={{ color: 'var(--text-secondary)' }}>Scanned {totalScanned.toLocaleString()} files — everything looks clean.</p>
+        {warnings.length > 0 && (
+          <div style={{
+            background:'var(--amber-dim)', border:'1px solid var(--amber)',
+            borderRadius:'var(--radius-sm)', padding:'10px 16px', maxWidth: 440,
+          }}>
+            <p style={{ fontSize: 12, color: 'var(--amber)', fontWeight: 600 }}>
+              ⚠ {warnings.length} item{warnings.length !== 1 ? 's' : ''} skipped during scan
+            </p>
+          </div>
+        )}
         <button onClick={onBack} style={btnPrimary}>Scan again</button>
       </div>
     );
@@ -260,6 +271,46 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
               </div>
             );
           })}
+
+          {/* ── Skipped files warnings panel ── */}
+          {warnings.length > 0 && (
+            <div style={{
+              background: 'var(--bg-surface)', border: '1px solid var(--amber)',
+              borderRadius: 'var(--radius-md)', marginTop: 10, overflow: 'hidden',
+            }}>
+              <div
+                onClick={() => setWarningsOpen(v => !v)}
+                style={{
+                  padding: '9px 14px', display: 'flex', alignItems: 'center', gap: 8,
+                  cursor: 'pointer', background: 'var(--amber-dim)',
+                }}
+              >
+                <span style={{ fontSize: 13 }}>⚠</span>
+                <span style={{ fontSize: 12, color: 'var(--amber)', fontWeight: 600 }}>
+                  {warnings.length} file{warnings.length !== 1 ? 's' : ''} skipped — click to see why
+                </span>
+                <span style={{ color: 'var(--text-muted)', fontSize: 12, marginLeft: 'auto' }}>
+                  {warningsOpen ? '▾' : '▸'}
+                </span>
+              </div>
+              {warningsOpen && (
+                <div style={{ maxHeight: 200, overflowY: 'auto' }}>
+                  {warnings.map((w, i) => (
+                    <div key={i} style={{
+                      padding: '7px 14px', borderTop: '1px solid var(--border)',
+                      display: 'flex', justifyContent: 'space-between', gap: 12,
+                    }}>
+                      <span style={{
+                        fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-secondary)',
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1,
+                      }}>{w.path}</span>
+                      <span style={{ fontSize: 10, color: 'var(--amber)', flexShrink: 0 }}>{w.reason}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* ── Action panel ── */}

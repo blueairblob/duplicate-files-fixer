@@ -1,10 +1,14 @@
 const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+const { Worker } = require('worker_threads');
 const path = require('path');
 const fs = require('fs');
-const crypto = require('crypto');
 const os = require('os');
+const { DEFAULT_EXCLUSIONS } = require('./exclusions');
 
 const isDev = process.env.NODE_ENV === 'development';
+
+let activeWorker = null;
+let exclusionList = [...DEFAULT_EXCLUSIONS]; // in-memory for the prototype; Sprint 4 persists this via electron-store
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -53,10 +57,8 @@ ipcMain.handle('dialog:openFolder', async () => {
 ipcMain.handle('fs:getLocations', async () => {
   const locations = [];
 
-  // Home directory
   locations.push({ label: 'Home', path: os.homedir(), icon: 'home' });
 
-  // Desktop / Documents / Downloads
   for (const name of ['Desktop', 'Documents', 'Downloads', 'Pictures', 'Music', 'Videos']) {
     const p = path.join(os.homedir(), name);
     try {
@@ -66,7 +68,6 @@ ipcMain.handle('fs:getLocations', async () => {
   }
 
   if (process.platform === 'win32') {
-    // Windows: drive letters
     const { execSync } = require('child_process');
     try {
       const out = execSync('wmic logicaldisk get name,drivetype,description /format:csv', { encoding: 'utf8' });
@@ -87,12 +88,10 @@ ipcMain.handle('fs:getLocations', async () => {
       }
     } catch {}
 
-    // Windows network shares via net use
     try {
       const { execSync } = require('child_process');
       const netOut = execSync('net use', { encoding: 'utf8' });
-      const lines = netOut.split('\n');
-      for (const line of lines) {
+      for (const line of netOut.split('\n')) {
         const match = line.match(/([A-Z]:)\s+(\\\\\S+)/);
         if (match) {
           locations.push({ label: `Network: ${match[2]} (${match[1]})`, path: match[1] + '\\', icon: 'network' });
@@ -101,7 +100,6 @@ ipcMain.handle('fs:getLocations', async () => {
     } catch {}
 
   } else {
-    // Linux/macOS: /media and /mnt mounts
     for (const base of ['/media', '/mnt', '/run/media']) {
       try {
         const entries = fs.readdirSync(base, { withFileTypes: true });
@@ -109,7 +107,6 @@ ipcMain.handle('fs:getLocations', async () => {
           if (e.isDirectory()) {
             const mp = path.join(base, e.name);
             try {
-              // Check if mounted (has content)
               fs.readdirSync(mp);
               locations.push({ label: `${e.name} (${mp})`, path: mp, icon: 'usb' });
             } catch {}
@@ -118,7 +115,6 @@ ipcMain.handle('fs:getLocations', async () => {
       } catch {}
     }
 
-    // macOS Volumes
     if (process.platform === 'darwin') {
       try {
         const vols = fs.readdirSync('/Volumes', { withFileTypes: true });
@@ -130,7 +126,6 @@ ipcMain.handle('fs:getLocations', async () => {
       } catch {}
     }
 
-    // Network shares from /etc/fstab
     try {
       const fstab = fs.readFileSync('/etc/fstab', 'utf8');
       for (const line of fstab.split('\n')) {
@@ -147,162 +142,164 @@ ipcMain.handle('fs:getLocations', async () => {
   return locations;
 });
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-const SUPPORTED_EXTS = new Set([
-  '.jpg', '.jpeg', '.png', '.gif', '.heic', '.raw', '.bmp', '.webp',
-  '.mp3', '.aac', '.flac', '.wav', '.ogg', '.m4a',
-  '.mp4', '.mov', '.avi', '.mkv', '.wmv',
-  '.pdf', '.docx', '.xlsx', '.pptx', '.doc', '.xls', '.txt',
-  '.zip', '.rar', '.7z', '.eml',
-]);
+// ── IPC: Exclusion list (in-memory; persisted properly in Sprint 4) ──────────
+ipcMain.handle('exclusions:get', async () => exclusionList);
 
-const TYPE_MAP = {
-  photos:   ['.jpg','.jpeg','.png','.gif','.heic','.raw','.bmp','.webp'],
-  audio:    ['.mp3','.aac','.flac','.wav','.ogg','.m4a'],
-  video:    ['.mp4','.mov','.avi','.mkv','.wmv'],
-  docs:     ['.pdf','.docx','.xlsx','.pptx','.doc','.xls','.txt'],
-  archives: ['.zip','.rar','.7z'],
-};
-
-function shouldInclude(filePath, filters) {
-  const ext = path.extname(filePath).toLowerCase();
-  if (!SUPPORTED_EXTS.has(ext)) return false;
-  if (filters.types && filters.types.length > 0) {
-    const allowed = filters.types.flatMap(t => TYPE_MAP[t] || []);
-    if (!allowed.includes(ext)) return false;
-  }
-  if (filters.minSize && filters.minSize > 0) {
-    try {
-      if (fs.statSync(filePath).size < filters.minSize) return false;
-    } catch { return false; }
-  }
-  return true;
-}
-
-function hashFile(filePath) {
-  return new Promise((resolve, reject) => {
-    const hash = crypto.createHash('md5');
-    const stream = fs.createReadStream(filePath);
-    stream.on('data', d => hash.update(d));
-    stream.on('end', () => resolve(hash.digest('hex')));
-    stream.on('error', reject);
-  });
-}
-
-async function walkDir(dir, filters, fileMap, label, win, counter) {
-  let entries;
-  try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
-  catch { return; }
-
-  for (const entry of entries) {
-    const fullPath = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      await walkDir(fullPath, filters, fileMap, label, win, counter);
-    } else if (entry.isFile()) {
-      if (!shouldInclude(fullPath, filters)) continue;
-      try {
-        const stat = fs.statSync(fullPath);
-        const hash = await hashFile(fullPath);
-        counter.n++;
-        if (!fileMap.has(hash)) fileMap.set(hash, []);
-        fileMap.get(hash).push({
-          path: fullPath,
-          name: entry.name,
-          size: stat.size,
-          modified: stat.mtime.toISOString(),
-          ext: path.extname(fullPath).toLowerCase(),
-          sourceLabel: label, // 'protected' | 'target'
-        });
-        if (counter.n % 25 === 0) {
-          win?.webContents.send('scan:progress', { scanned: counter.n });
-        }
-      } catch { /* skip unreadable */ }
-    }
-  }
-}
-
-// ── IPC: Scan ─────────────────────────────────────────────────────────────────
-ipcMain.handle('scan:start', async (event, { mode, protectedFolders, targetFolders, filters, autoMarkRule }) => {
-  const win = BrowserWindow.getFocusedWindow();
-  const fileMap = new Map();
-  const counter = { n: 0 };
-
-  if (mode === 'compare') {
-    for (const folder of (protectedFolders || [])) {
-      await walkDir(folder, filters || {}, fileMap, 'protected', win, counter);
-    }
-    for (const folder of (targetFolders || [])) {
-      await walkDir(folder, filters || {}, fileMap, 'target', win, counter);
-    }
-  } else {
-    // simple mode — all folders are targets
-    for (const folder of (targetFolders || [])) {
-      await walkDir(folder, filters || {}, fileMap, 'target', win, counter);
-    }
-  }
-
-  // Build groups
-  const groups = [];
-  let groupId = 0;
-  for (const [hash, files] of fileMap.entries()) {
-    if (files.length < 2) continue;
-
-    const hasProtected = files.some(f => f.sourceLabel === 'protected');
-    const hasTarget    = files.some(f => f.sourceLabel === 'target');
-
-    // In compare mode only show groups that span both zones (or target-only dupes)
-    if (mode === 'compare' && !hasTarget) continue;
-
-    // Apply auto-mark rule
-    let markedPaths = new Set();
-
-    if (mode === 'compare' && hasProtected) {
-      // Protected-wins: always mark target copies that duplicate a protected file
-      files.filter(f => f.sourceLabel === 'target').forEach(f => markedPaths.add(f.path));
-    } else {
-      // Within target-only dupes, apply tiebreak rule
-      let sorted;
-      if (autoMarkRule === 'keep-newest' || autoMarkRule === 'protected-wins') {
-        sorted = [...files].sort((a, b) => new Date(b.modified) - new Date(a.modified));
-      } else if (autoMarkRule === 'keep-oldest') {
-        sorted = [...files].sort((a, b) => new Date(a.modified) - new Date(b.modified));
-      } else if (autoMarkRule === 'keep-largest') {
-        sorted = [...files].sort((a, b) => b.size - a.size);
-      } else {
-        sorted = [...files].sort((a, b) => new Date(b.modified) - new Date(a.modified));
-      }
-      sorted.slice(1).forEach(f => markedPaths.add(f.path));
-    }
-
-    groups.push({
-      id: groupId++,
-      hash,
-      files,
-      autoMarked: Array.from(markedPaths),
-      hasProtected,
-    });
-  }
-
-  return { groups, totalScanned: counter.n, mode };
+ipcMain.handle('exclusions:set', async (event, list) => {
+  exclusionList = Array.isArray(list) ? list : exclusionList;
+  return exclusionList;
 });
 
-// ── IPC: Delete ───────────────────────────────────────────────────────────────
+ipcMain.handle('exclusions:resetDefaults', async () => {
+  exclusionList = [...DEFAULT_EXCLUSIONS];
+  return exclusionList;
+});
+
+// ── IPC: Scan (worker-thread based) ───────────────────────────────────────────
+ipcMain.handle('scan:start', async (event, opts) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+
+  return new Promise((resolve) => {
+    if (activeWorker) {
+      try { activeWorker.terminate(); } catch {}
+      activeWorker = null;
+    }
+
+    const worker = new Worker(path.join(__dirname, 'scanWorker.js'), {
+      workerData: {
+        mode: opts.mode,
+        protectedFolders: opts.protectedFolders || [],
+        targetFolders: opts.targetFolders || [],
+        filters: opts.filters || {},
+        autoMarkRule: opts.autoMarkRule,
+        exclusions: exclusionList,
+        includeEmpty: !!opts.includeEmpty,
+      },
+    });
+    activeWorker = worker;
+
+    worker.on('message', (msg) => {
+      if (msg.type === 'progress') {
+        win?.webContents.send('scan:progress', { scanned: msg.scanned, phase: msg.phase, total: msg.total });
+      } else if (msg.type === 'done') {
+        activeWorker = null;
+        resolve(msg.result);
+      } else if (msg.type === 'cancelled') {
+        activeWorker = null;
+        resolve({ groups: [], emptyFiles: [], totalScanned: 0, totalHashed: 0, warnings: [], cancelled: true });
+      } else if (msg.type === 'error') {
+        activeWorker = null;
+        resolve({ groups: [], emptyFiles: [], totalScanned: 0, totalHashed: 0, warnings: [{ path: '-', reason: msg.message }], error: msg.message });
+      }
+    });
+
+    worker.on('error', (err) => {
+      activeWorker = null;
+      resolve({ groups: [], emptyFiles: [], totalScanned: 0, totalHashed: 0, warnings: [{ path: '-', reason: err.message }], error: err.message });
+    });
+  });
+});
+
+ipcMain.handle('scan:cancel', async () => {
+  if (activeWorker) {
+    activeWorker.postMessage({ type: 'cancel' });
+    return true;
+  }
+  return false;
+});
+
+// ── IPC: Delete with Linux trash fallback + quarantine manifest ──────────────
+const QUARANTINE_DIR = path.join(os.homedir(), '.dff-quarantine');
+const MANIFEST_PATH = path.join(QUARANTINE_DIR, 'manifest.json');
+
+function ensureQuarantineDir() {
+  try {
+    fs.mkdirSync(QUARANTINE_DIR, { recursive: true });
+  } catch {}
+}
+
+function appendManifest(entry) {
+  ensureQuarantineDir();
+  let manifest = [];
+  try {
+    manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf8'));
+  } catch {}
+  manifest.push(entry);
+  try {
+    fs.writeFileSync(MANIFEST_PATH, JSON.stringify(manifest, null, 2));
+  } catch {}
+}
+
+function quarantineFile(filePath) {
+  ensureQuarantineDir();
+  const basename = path.basename(filePath);
+  const stamp = Date.now();
+  const quarantinedName = `${stamp}_${basename}`;
+  const destPath = path.join(QUARANTINE_DIR, quarantinedName);
+  fs.renameSync(filePath, destPath);
+  appendManifest({
+    originalPath: filePath,
+    quarantinePath: destPath,
+    deletedAt: new Date().toISOString(),
+  });
+  return destPath;
+}
+
 ipcMain.handle('files:delete', async (event, filePaths) => {
-  const results = { deleted: [], failed: [] };
+  const results = { deleted: [], failed: [], quarantined: [] };
   for (const filePath of filePaths) {
+    // 1. Try the OS trash first (works reliably on Windows/macOS, often fails on Linux/WSL)
     try {
       await shell.trashItem(filePath);
       results.deleted.push(filePath);
+      continue;
     } catch {
-      try {
-        fs.unlinkSync(filePath);
-        results.deleted.push(filePath);
-      } catch (e) {
-        results.failed.push({ path: filePath, error: e.message });
-      }
+      // fall through to quarantine fallback
+    }
+
+    // 2. Fallback: move to in-app quarantine folder with a manifest entry, recoverable
+    try {
+      quarantineFile(filePath);
+      results.deleted.push(filePath);
+      results.quarantined.push(filePath);
+      continue;
+    } catch {
+      // fall through to last-resort permanent delete
+    }
+
+    // 3. Last resort: permanent delete (only reached if both trash and quarantine fail,
+    //    e.g. cross-device rename error or a read-only filesystem)
+    try {
+      fs.unlinkSync(filePath);
+      results.deleted.push(filePath);
+    } catch (e) {
+      results.failed.push({ path: filePath, error: e.message });
     }
   }
   return results;
+});
+
+ipcMain.handle('files:getQuarantineManifest', async () => {
+  try {
+    return JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf8'));
+  } catch {
+    return [];
+  }
+});
+
+ipcMain.handle('files:restoreFromQuarantine', async (event, quarantinePath) => {
+  try {
+    let manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf8'));
+    const entry = manifest.find(e => e.quarantinePath === quarantinePath);
+    if (!entry) return { success: false, error: 'Not found in manifest' };
+
+    fs.renameSync(entry.quarantinePath, entry.originalPath);
+    manifest = manifest.filter(e => e.quarantinePath !== quarantinePath);
+    fs.writeFileSync(MANIFEST_PATH, JSON.stringify(manifest, null, 2));
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
 });
 
 // ── IPC: Window controls ──────────────────────────────────────────────────────

@@ -3,12 +3,13 @@ import React, { useEffect, useRef, useState } from 'react';
 const api = window.electronAPI;
 
 export default function ScanView({ scanConfig, onComplete, onCancel }) {
-  const { mode, protectedFolders = [], targetFolders = [], filters = {}, autoMarkRule } = scanConfig || {};
-  const allFolders = [...(protectedFolders || []), ...(targetFolders || [])];
+  const { mode, protectedFolders = [], targetFolders = [], filters = {}, autoMarkRule, includeEmpty } = scanConfig || {};
 
   const [scanned, setScanned] = useState(0);
-  const [phase, setPhase] = useState(mode === 'compare' ? 'Scanning protected source…' : 'Scanning files…');
+  const [phase, setPhase] = useState('walking'); // 'walking' | 'hashing'
+  const [hashTotal, setHashTotal] = useState(0);
   const [dots, setDots] = useState('');
+  const [cancelling, setCancelling] = useState(false);
   const cancelled = useRef(false);
 
   useEffect(() => {
@@ -18,35 +19,37 @@ export default function ScanView({ scanConfig, onComplete, onCancel }) {
 
   useEffect(() => {
     if (!api) {
-      // Demo mode
+      // Demo mode (no Electron)
       let n = 0;
       const interval = setInterval(() => {
         n += Math.floor(Math.random() * 20) + 5;
         setScanned(n);
-        if (n > 150 && mode === 'compare') setPhase('Scanning target folders…');
+        if (n > 150) setPhase('hashing');
         if (n >= 400) {
           clearInterval(interval);
-          onComplete({ groups: generateDemoGroups(mode), totalScanned: n, mode });
+          onComplete({ groups: generateDemoGroups(mode), emptyFiles: [], totalScanned: n, totalHashed: 120, warnings: [], mode });
         }
       }, 100);
       return () => clearInterval(interval);
     }
 
-    api.onScanProgress(({ scanned: n }) => {
+    api.onScanProgress(({ scanned: n, phase: p, total }) => {
       if (cancelled.current) return;
       setScanned(n);
-      if (n > 100 && mode === 'compare') setPhase('Scanning target folders…');
+      if (p) setPhase(p);
+      if (total) setHashTotal(total);
     });
 
-    api.startScan({ mode, protectedFolders, targetFolders, filters, autoMarkRule })
+    api.startScan({ mode, protectedFolders, targetFolders, filters, autoMarkRule, includeEmpty })
       .then(result => {
         api.removeScanProgress();
         if (!cancelled.current) onComplete(result);
       })
       .catch(err => {
         api.removeScanProgress();
-        console.error('Scan error:', err);
-        if (!cancelled.current) onComplete({ groups: [], totalScanned: scanned, mode, error: err.message });
+        if (!cancelled.current) {
+          onComplete({ groups: [], emptyFiles: [], totalScanned: scanned, totalHashed: 0, warnings: [{ path: '-', reason: err.message }], mode, error: err.message });
+        }
       });
 
     return () => {
@@ -54,6 +57,21 @@ export default function ScanView({ scanConfig, onComplete, onCancel }) {
       api.removeScanProgress();
     };
   }, []); // eslint-disable-line
+
+  const handleCancel = async () => {
+    if (!api) {
+      onCancel();
+      return;
+    }
+    setCancelling(true);
+    cancelled.current = true;
+    await api.cancelScan();
+    onCancel();
+  };
+
+  const phaseLabel = phase === 'hashing'
+    ? (hashTotal > 0 ? `Comparing ${scanned} of ${hashTotal} candidate files` : 'Comparing file contents')
+    : 'Scanning folders';
 
   return (
     <div style={{
@@ -76,14 +94,21 @@ export default function ScanView({ scanConfig, onComplete, onCancel }) {
             {scanned}
           </text>
           <text x="60" y="75" textAnchor="middle" fontSize="8" fill="var(--text-muted)" fontFamily="var(--font-mono)">
-            files
+            {phase === 'hashing' ? 'compared' : 'files'}
           </text>
         </svg>
       </div>
 
       <div style={{ textAlign: 'center' }}>
-        <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 6 }}>Scanning for duplicates</h2>
-        <p style={{ color: 'var(--text-secondary)', fontSize: 13 }}>{phase}{dots}</p>
+        <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 6 }}>
+          {phase === 'hashing' ? 'Comparing file contents' : 'Scanning for duplicates'}
+        </h2>
+        <p style={{ color: 'var(--text-secondary)', fontSize: 13 }}>{phaseLabel}{dots}</p>
+        {phase === 'hashing' && (
+          <p style={{ color: 'var(--text-muted)', fontSize: 11, marginTop: 4 }}>
+            Only files that share an identical size are compared — SHA-256
+          </p>
+        )}
       </div>
 
       <div style={{
@@ -99,19 +124,22 @@ export default function ScanView({ scanConfig, onComplete, onCancel }) {
           </div>
         )}
         <div>
-          <p style={{ fontSize: 10, color: 'var(--red)', fontWeight: 600, marginBottom: 4, letterSpacing: '0.06em' }}>🎯 {mode === 'compare' ? 'TARGET' : 'SCANNING'}</p>
+          <p style={{ fontSize: 10, color: 'var(--red)', fontWeight: 600, marginBottom: 4, letterSpacing: '0.06em' }}>
+            {mode === 'compare' ? '🎯 TARGET' : '🔍 SCANNING'}
+          </p>
           {targetFolders.map(f => (
             <p key={f} style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-secondary)', marginBottom: 2 }}>📂 {f}</p>
           ))}
         </div>
       </div>
 
-      <button onClick={onCancel} style={{
+      <button onClick={handleCancel} disabled={cancelling} style={{
         background: 'transparent', border: '1px solid var(--border)',
         borderRadius: 'var(--radius-sm)', color: 'var(--text-muted)',
-        padding: '7px 20px', fontSize: 12, cursor: 'pointer',
+        padding: '7px 20px', fontSize: 12, cursor: cancelling ? 'default' : 'pointer',
+        opacity: cancelling ? 0.5 : 1,
       }}>
-        Cancel
+        {cancelling ? 'Cancelling…' : 'Cancel'}
       </button>
     </div>
   );

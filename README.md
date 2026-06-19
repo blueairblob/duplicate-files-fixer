@@ -1,12 +1,18 @@
 # Duplicate Files Fixer — Desktop Prototype
 
-A working Electron + React prototype covering the core features from the PRD:
-- Folder selection (browse or drag-and-drop)
+A working Electron + React prototype covering the core features from the PRD, now through **Sprint 1** of the development plan (see `PLAN.md`).
+
+- Folder selection (browse, location picker, or drag-and-drop)
 - File type and size filters
-- MD5 hash-based duplicate detection
-- Grouped results with auto-mark (keep newest, mark rest)
-- Manual selection override
-- Confirm → delete to Recycle Bin
+- **Two-pass SHA-256 duplicate detection** — size-grouped first, only same-size files are hashed
+- **Background worker thread scanning** — UI stays responsive, scans are cancellable mid-walk
+- Compare mode: protected source vs. scan target, with shield badges on protected files
+- Auto-mark rules: protected-wins, keep-newest, keep-oldest, keep-largest
+- **Exclusion list** — pre-populated defaults (`node_modules`, `.git`, system folders, cloud sync caches), editable in-app
+- **Zero-byte file detection** — grouped separately from content duplicates
+- **Scan warnings panel** — permission errors, locked files, etc. surfaced instead of silently skipped
+- Manual selection override, Select All / Deselect All
+- Confirm → delete, with **Linux/WSL trash fallback**: if the OS trash fails, files move to an in-app quarantine folder (`~/.dff-quarantine/`) with a recovery manifest, instead of being silently lost
 - Post-deletion summary screen
 
 ---
@@ -14,7 +20,7 @@ A working Electron + React prototype covering the core features from the PRD:
 ## Requirements
 
 - **Node.js** 18+ (https://nodejs.org)
-- **Windows 10/11** (for Electron shell features like `shell.trashItem`)
+- Tested on **Windows 11**, **Linux/WSL**, and designed to run on **macOS** (untested on real hardware — see Sprint 2 notes)
 
 ---
 
@@ -32,47 +38,71 @@ npm run dev
 
 ---
 
+## Running the tests
+
+```bash
+npx vitest run
+```
+
+45 tests across three suites:
+- `src/tests/scanLogic.test.js` — file inclusion filters, auto-mark rules (all 4), edge cases
+- `src/tests/exclusions.test.js` — exclusion list matching: exact names, glob patterns, path prefixes
+- `src/tests/twoPassScan.test.js` — the size-grouping logic that makes two-pass scanning fast
+
+The scan worker, quarantine fallback, and cancellation signal have also been verified with live smoke tests against a real file tree (not part of the automated suite, since they need actual disk I/O and a worker thread — see Sprint 1 notes in `PLAN.md` for what was checked).
+
+---
+
 ## Project Structure
 
 ```
 ├── src/
 │   ├── main/
-│   │   ├── main.js        ← Electron main process (file system, IPC)
-│   │   └── preload.js     ← Secure IPC bridge to renderer
+│   │   ├── main.js          ← Electron main process: IPC, worker lifecycle, delete/quarantine
+│   │   ├── preload.js       ← Secure IPC bridge to renderer
+│   │   ├── scanWorker.js    ← Runs in worker_threads — two-pass SHA-256 scan, cancellable
+│   │   └── exclusions.js    ← Pure exclusion-matching logic (name/glob/path-prefix)
 │   └── renderer/
-│       ├── main.jsx       ← React entry point
-│       ├── App.jsx        ← View state machine
-│       ├── index.css      ← Design tokens + global styles
+│       ├── main.jsx         ← React entry point
+│       ├── App.jsx          ← View state machine
+│       ├── index.css        ← Design tokens + global styles
 │       ├── components/
-│       │   └── TitleBar.jsx
+│       │   ├── TitleBar.jsx
+│       │   ├── LocationPicker.jsx       ← Home/Documents/Drives/Network browser
+│       │   └── ExclusionListPanel.jsx   ← Editable exclusion list UI
 │       └── views/
-│           ├── HomeView.jsx     ← Folder + filter selection
-│           ├── ScanView.jsx     ← Animated scan progress
-│           ├── ResultsView.jsx  ← Duplicate groups + delete UI
-│           └── DoneView.jsx     ← Summary screen
-├── index.html             ← Vite entry
+│           ├── HomeView.jsx     ← Mode select, folder zones, filters, exclusions
+│           ├── ScanView.jsx     ← Two-phase progress (walk → hash), real cancel
+│           ├── ResultsView.jsx  ← Duplicate groups, shield badges, warnings panel
+│           └── DoneView.jsx     ← Summary, quarantine notice if trash fallback used
+├── src/tests/                ← Vitest unit tests
+├── index.html                ← Vite entry
 ├── vite.config.js
 └── package.json
 ```
 
 ---
 
-## Core Feature Coverage (from PRD)
+## Core Feature Coverage (from PRD + Sprint 1)
 
-| PRD Feature | Implemented |
+| Feature | Implemented |
 |---|---|
-| Hash-based duplicate detection | ✅ MD5 via Node `crypto` |
+| Hash-based duplicate detection | ✅ SHA-256, two-pass (size-grouped, collision-safe) |
 | File type filters | ✅ Photos, Audio, Video, Docs, Archives |
 | Size filter | ✅ Configurable minimum |
 | Drag-and-drop folders | ✅ |
-| Full scan / category scan | ✅ |
+| Location picker | ✅ Home/Documents/Drives/USB/Network, cross-platform |
+| Compare mode (protected vs target) | ✅ Shield badges, protected files never selectable |
+| Auto-mark rules | ✅ 4 rules incl. protected-wins |
+| Exclusion list | ✅ Editable, pre-populated defaults |
+| Zero-byte file detection | ✅ Separate grouping |
+| Non-blocking scan | ✅ Worker thread, UI stays responsive |
+| Scan cancellation | ✅ Verified mid-walk |
+| Scan error surfacing | ✅ Warnings panel |
 | Grouped results display | ✅ Collapsible groups |
-| File metadata (name, size, path, date) | ✅ |
-| Auto-mark (keep newest) | ✅ |
 | Manual override | ✅ Click to toggle |
-| Select All / Deselect All | ✅ |
 | Confirm before delete | ✅ Modal dialog |
-| Recycle Bin deletion | ✅ `shell.trashItem` |
+| Safe deletion | ✅ Recycle Bin, with Linux quarantine fallback + manifest |
 | Post-deletion summary | ✅ Animated counter + stats |
 
 ---
@@ -87,11 +117,9 @@ Output: `release/` folder containing an NSIS installer.
 
 ---
 
-## Next Steps (not in prototype)
+## Next: Sprint 2
 
-- Similar image detection (histogram/perceptual hash)
-- Google Drive OAuth + cloud scan
-- In-app Recycle Bin / recovery view
-- EML-specific scanning
-- Empty folder detection and removal
-- Scan progress cancellation
+- Enhanced cross-platform folder browser modal (left: locations, centre: live tree, right: confirm)
+- Platform-aware location detection rewrite (PowerShell `Get-PSDrive`/`Get-SmbMapping` on Windows, `/Volumes` on macOS)
+
+See `PLAN.md` for the full roadmap (Sprints 2–5).

@@ -1,5 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import LocationPicker from '../components/LocationPicker.jsx';
+import ExclusionListPanel from '../components/ExclusionListPanel.jsx';
 
 const api = window.electronAPI;
 
@@ -110,6 +111,7 @@ export default function HomeView({ onStartScan }) {
   const [simpleFolders, setSimpleFolders]       = useState([]);
   const [types, setTypes]           = useState([]);
   const [minSize, setMinSize]       = useState(0);
+  const [includeEmpty, setIncludeEmpty] = useState(false);
   const [autoMarkRule, setAutoMarkRule] = useState('protected-wins');
 
   const pickFolders = useCallback(async () => {
@@ -139,6 +141,7 @@ export default function HomeView({ onStartScan }) {
       targetFolders:    mode === 'compare' ? targetFolders : simpleFolders,
       filters: { types, minSize },
       autoMarkRule,
+      includeEmpty,
     });
   };
 
@@ -306,6 +309,28 @@ export default function HomeView({ onStartScan }) {
           }}>
             {SIZE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
+        </div>
+
+        {/* Zero-byte files */}
+        <div>
+          <label style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer', width:'fit-content' }}>
+            <input
+              type="checkbox"
+              checked={includeEmpty}
+              onChange={e => setIncludeEmpty(e.target.checked)}
+              style={{ accentColor: 'var(--teal)' }}
+            />
+            <span style={{ fontSize:12, color:'var(--text-secondary)' }}>Include empty (zero-byte) files</span>
+          </label>
+          <p style={{ fontSize:10, color:'var(--text-muted)', marginTop:4, marginLeft:22 }}>
+            Grouped separately by name — never mixed with content-based duplicates.
+          </p>
+        </div>
+
+        {/* Exclusion list */}
+        <div>
+          <Label>Scan exclusions</Label>
+          <ExclusionListPanel />
         </div>
 
         {/* Start */}

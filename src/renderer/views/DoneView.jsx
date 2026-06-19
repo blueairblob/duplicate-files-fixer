@@ -9,7 +9,7 @@ function formatSize(bytes) {
 }
 
 export default function DoneView({ deleteResult, onScanAgain }) {
-  const { deleted = [], failed = [], markedBytes = 0, totalScanned = 0 } = deleteResult || {};
+  const { deleted = [], failed = [], quarantined = [], markedBytes = 0, totalScanned = 0 } = deleteResult || {};
   const [count, setCount] = useState(0);
 
   // Animate the counter
@@ -90,8 +90,8 @@ export default function DoneView({ deleteResult, onScanAgain }) {
         ))}
       </div>
 
-      {/* Recycle bin note */}
-      {deleted.length > 0 && (
+      {/* Recycle bin / quarantine note */}
+      {deleted.length > 0 && quarantined.length === 0 && (
         <div style={{
           background: 'var(--teal-dim)',
           border: '1px solid var(--teal)',
@@ -101,6 +101,20 @@ export default function DoneView({ deleteResult, onScanAgain }) {
           maxWidth: 400, textAlign: 'center',
         }}>
           ♻ Files were moved to the Recycle Bin — you can still recover them if needed.
+        </div>
+      )}
+
+      {quarantined.length > 0 && (
+        <div style={{
+          background: 'var(--amber-dim)',
+          border: '1px solid var(--amber)',
+          borderRadius: 'var(--radius-sm)',
+          padding: '10px 18px',
+          fontSize: 12, color: 'var(--amber)',
+          maxWidth: 440, textAlign: 'center',
+        }}>
+          🛡 {quarantined.length} file{quarantined.length !== 1 ? 's' : ''} couldn't reach the system Recycle Bin
+          and {quarantined.length !== 1 ? 'were' : 'was'} moved to an in-app quarantine folder instead — still fully recoverable.
         </div>
       )}
 
