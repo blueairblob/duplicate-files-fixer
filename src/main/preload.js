@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('electronAPI', {
   openFolder:       ()       => ipcRenderer.invoke('dialog:openFolder'),
   getLocations:     ()       => ipcRenderer.invoke('fs:getLocations'),
+  listDirectory:    (path)   => ipcRenderer.invoke('fs:listDirectory', path),
 
   startScan:        (opts)   => ipcRenderer.invoke('scan:start', opts),
   cancelScan:       ()       => ipcRenderer.invoke('scan:cancel'),

@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import LocationPicker from '../components/LocationPicker.jsx';
+import FolderBrowserModal from '../components/FolderBrowserModal.jsx';
 import ExclusionListPanel from '../components/ExclusionListPanel.jsx';
 
 const api = window.electronAPI;
@@ -27,9 +27,9 @@ const AUTO_MARK_RULES = [
   { id: 'keep-largest',   label: 'Keep largest',          desc: 'Keep the highest-size copy (useful for media)' },
 ];
 
-// ── Folder zone with integrated location picker ───────────────────────────────
-function FolderZone({ label, sublabel, accent, folders, onAdd, onAddPath, onRemove }) {
-  const [showPicker, setShowPicker] = useState(false);
+// ── Folder zone — single "Browse" button opens the three-panel modal ─────────
+function FolderZone({ label, sublabel, accent, folders, onAddPath, onRemove }) {
+  const [modalOpen, setModalOpen] = useState(false);
   const [dragging, setDragging] = useState(false);
 
   const handleDrop = (e) => {
@@ -41,9 +41,9 @@ function FolderZone({ label, sublabel, accent, folders, onAdd, onAddPath, onRemo
     if (dropped.length) dropped.forEach(p => onAddPath(p));
   };
 
-  const handlePickLocation = (p) => {
-    onAddPath(p);
-    setShowPicker(false);
+  const handleConfirm = (selectedPath) => {
+    onAddPath(selectedPath);
+    setModalOpen(false);
   };
 
   return (
@@ -68,10 +68,7 @@ function FolderZone({ label, sublabel, accent, folders, onAdd, onAddPath, onRemo
         {folders.length === 0 ? (
           <div style={{ textAlign:'center' }}>
             <p style={{ fontSize:12, color:'var(--text-muted)', marginBottom:10 }}>Drop folder here, or</p>
-            <div style={{ display:'flex', gap:8, justifyContent:'center' }}>
-              <button onClick={onAdd} style={{ ...btnSm, borderColor:accent, color:accent }}>📂 Browse</button>
-              <button onClick={() => setShowPicker(v => !v)} style={{ ...btnSm, borderColor:accent, color:accent }}>🌐 Locations</button>
-            </div>
+            <button onClick={() => setModalOpen(true)} style={{ ...btnSm, borderColor:accent, color:accent }}>📂 Browse</button>
           </div>
         ) : (
           <div style={{ display:'flex', flexDirection:'column', gap:5 }}>
@@ -86,22 +83,23 @@ function FolderZone({ label, sublabel, accent, folders, onAdd, onAddPath, onRemo
                 <button onClick={() => onRemove(f)} style={{ ...btnGhost, fontSize:10, color:'var(--red)', flexShrink:0 }}>✕</button>
               </div>
             ))}
-            <div style={{ display:'flex', gap:8, marginTop:4 }}>
-              <button onClick={onAdd} style={{ ...btnGhost, fontSize:11, color:accent }}>+ Browse</button>
-              <button onClick={() => setShowPicker(v => !v)} style={{ ...btnGhost, fontSize:11, color:accent }}>🌐 Locations</button>
-            </div>
+            <button onClick={() => setModalOpen(true)} style={{ ...btnGhost, fontSize:11, color:accent, marginTop:4, alignSelf:'flex-start' }}>+ Browse</button>
           </div>
         )}
       </div>
 
-      {showPicker && (
-        <div style={{ marginTop:8 }}>
-          <LocationPicker onSelect={handlePickLocation} />
-        </div>
+      {modalOpen && (
+        <FolderBrowserModal
+          title={`Add to ${label}`}
+          accent={accent}
+          onConfirm={handleConfirm}
+          onClose={() => setModalOpen(false)}
+        />
       )}
     </div>
   );
 }
+
 
 // ── Main view ─────────────────────────────────────────────────────────────────
 export default function HomeView({ onStartScan }) {
@@ -113,16 +111,6 @@ export default function HomeView({ onStartScan }) {
   const [minSize, setMinSize]       = useState(0);
   const [includeEmpty, setIncludeEmpty] = useState(false);
   const [autoMarkRule, setAutoMarkRule] = useState('protected-wins');
-
-  const pickFolders = useCallback(async () => {
-    if (!api) return [];
-    return await api.openFolder();
-  }, []);
-
-  const addToZone = async (setter) => {
-    const paths = await pickFolders();
-    if (paths.length) setter(prev => [...new Set([...prev, ...paths])]);
-  };
 
   const addPathToZone = (setter, p) => setter(prev => [...new Set([...prev, p])]);
 
@@ -225,7 +213,6 @@ export default function HomeView({ onStartScan }) {
               <FolderZone
                 label="Protected source" sublabel="— never deleted" accent="var(--teal)"
                 folders={protectedFolders}
-                onAdd={() => addToZone(setProtectedFolders)}
                 onAddPath={p => addPathToZone(setProtectedFolders, p)}
                 onRemove={f => setProtectedFolders(prev => prev.filter(x => x !== f))}
               />
@@ -235,7 +222,6 @@ export default function HomeView({ onStartScan }) {
               <FolderZone
                 label="Scan target" sublabel="— dupes marked for deletion" accent="var(--red)"
                 folders={targetFolders}
-                onAdd={() => addToZone(setTargetFolders)}
                 onAddPath={p => addPathToZone(setTargetFolders, p)}
                 onRemove={f => setTargetFolders(prev => prev.filter(x => x !== f))}
               />
@@ -247,7 +233,6 @@ export default function HomeView({ onStartScan }) {
             <FolderZone
               label="Scan folders" sublabel="— all dupes found here" accent="var(--teal)"
               folders={simpleFolders}
-              onAdd={() => addToZone(setSimpleFolders)}
               onAddPath={p => addPathToZone(setSimpleFolders, p)}
               onRemove={f => setSimpleFolders(prev => prev.filter(x => x !== f))}
             />

@@ -54,11 +54,14 @@ ipcMain.handle('dialog:openFolder', async () => {
 });
 
 // ── IPC: Get network/drive locations ─────────────────────────────────────────
+// Platform-aware detection feeding into one unified location format:
+//   { label, path, icon: 'home'|'desktop'|'documents'|'downloads'|'pictures'|
+//                         'music'|'videos'|'hdd'|'usb'|'network'|'disc'|'drive' }
 ipcMain.handle('fs:getLocations', async () => {
   const locations = [];
 
+  // Quick access — same on every platform
   locations.push({ label: 'Home', path: os.homedir(), icon: 'home' });
-
   for (const name of ['Desktop', 'Documents', 'Downloads', 'Pictures', 'Music', 'Videos']) {
     const p = path.join(os.homedir(), name);
     try {
@@ -68,7 +71,40 @@ ipcMain.handle('fs:getLocations', async () => {
   }
 
   if (process.platform === 'win32') {
-    const { execSync } = require('child_process');
+    locations.push(...getWindowsLocations());
+  } else if (process.platform === 'darwin') {
+    locations.push(...getMacLocations());
+  } else {
+    locations.push(...getLinuxLocations());
+  }
+
+  return locations;
+});
+
+function getWindowsLocations() {
+  const locations = [];
+  const { execSync } = require('child_process');
+
+  // PowerShell Get-PSDrive replaces the deprecated wmic — reliable on Windows 11
+  try {
+    const psScript = `Get-PSDrive -PSProvider FileSystem | Select-Object Name,Description,Free,Used | ConvertTo-Json -Compress`;
+    const out = execSync(`powershell -NoProfile -Command "${psScript}"`, { encoding: 'utf8' });
+    const parsed = JSON.parse(out);
+    const drives = Array.isArray(parsed) ? parsed : [parsed];
+    for (const d of drives) {
+      if (!d.Name) continue;
+      const drivePath = `${d.Name}:\\`;
+      const sizeLabel = d.Used != null && d.Free != null
+        ? ` — ${formatBytes(d.Used + d.Free)}`
+        : '';
+      locations.push({
+        label: `${d.Description || 'Local Disk'} (${d.Name}:)${sizeLabel}`,
+        path: drivePath,
+        icon: 'hdd',
+      });
+    }
+  } catch {
+    // Fallback if PowerShell is unavailable for any reason
     try {
       const out = execSync('wmic logicaldisk get name,drivetype,description /format:csv', { encoding: 'utf8' });
       for (const line of out.split('\n').slice(2)) {
@@ -87,9 +123,25 @@ ipcMain.handle('fs:getLocations', async () => {
         }
       }
     } catch {}
+  }
 
+  // Network shares — Get-SmbMapping is the modern equivalent of `net use`
+  try {
+    const psScript = `Get-SmbMapping | Select-Object LocalPath,RemotePath | ConvertTo-Json -Compress`;
+    const out = execSync(`powershell -NoProfile -Command "${psScript}"`, { encoding: 'utf8' });
+    const parsed = JSON.parse(out);
+    const mappings = Array.isArray(parsed) ? parsed : (parsed.LocalPath ? [parsed] : []);
+    for (const m of mappings) {
+      if (!m.LocalPath || !m.RemotePath) continue;
+      locations.push({
+        label: `${m.RemotePath} (${m.LocalPath})`,
+        path: m.LocalPath + '\\',
+        icon: 'network',
+      });
+    }
+  } catch {
+    // Fallback to `net use` parsing
     try {
-      const { execSync } = require('child_process');
       const netOut = execSync('net use', { encoding: 'utf8' });
       for (const line of netOut.split('\n')) {
         const match = line.match(/([A-Z]:)\s+(\\\\\S+)/);
@@ -98,48 +150,154 @@ ipcMain.handle('fs:getLocations', async () => {
         }
       }
     } catch {}
+  }
 
-  } else {
-    for (const base of ['/media', '/mnt', '/run/media']) {
-      try {
-        const entries = fs.readdirSync(base, { withFileTypes: true });
-        for (const e of entries) {
-          if (e.isDirectory()) {
-            const mp = path.join(base, e.name);
-            try {
-              fs.readdirSync(mp);
-              locations.push({ label: `${e.name} (${mp})`, path: mp, icon: 'usb' });
-            } catch {}
-          }
-        }
-      } catch {}
+  return locations;
+}
+
+function getMacLocations() {
+  const locations = [];
+  try {
+    const vols = fs.readdirSync('/Volumes', { withFileTypes: true });
+    for (const v of vols) {
+      // Skip the boot volume — it's already covered by Home/Desktop/etc and
+      // including it clutters the list with the entire OS filesystem
+      if (v.name === 'Macintosh HD') continue;
+      if (v.isDirectory() || v.isSymbolicLink()) {
+        const volPath = `/Volumes/${v.name}`;
+        // Network shares mounted via Finder also live under /Volumes; we can't always
+        // distinguish them from local USB drives without deeper inspection, so default
+        // to 'drive' and only mark as network if the name hints at it
+        const looksNetwork = /^(smb|afp|nfs)[-_]/i.test(v.name) || v.name.includes('on ');
+        locations.push({ label: v.name, path: volPath, icon: looksNetwork ? 'network' : 'drive' });
+      }
     }
+  } catch {}
+  return locations;
+}
 
-    if (process.platform === 'darwin') {
-      try {
-        const vols = fs.readdirSync('/Volumes', { withFileTypes: true });
-        for (const v of vols) {
-          if (v.isDirectory() || v.isSymbolicLink()) {
-            locations.push({ label: v.name, path: `/Volumes/${v.name}`, icon: 'drive' });
-          }
-        }
-      } catch {}
-    }
+function getLinuxLocations() {
+  const locations = [];
+  const isWSL = (() => {
+    try { return fs.readFileSync('/proc/version', 'utf8').toLowerCase().includes('microsoft'); }
+    catch { return false; }
+  })();
 
+  // WSL-specific: expose /mnt/c, /mnt/d etc. as friendly "Windows drive" shortcuts
+  if (isWSL) {
     try {
-      const fstab = fs.readFileSync('/etc/fstab', 'utf8');
-      for (const line of fstab.split('\n')) {
-        if (line.startsWith('//') || line.startsWith('nfs')) {
-          const parts = line.trim().split(/\s+/);
-          if (parts[1] && parts[1].startsWith('/')) {
-            locations.push({ label: `Network: ${parts[0]} → ${parts[1]}`, path: parts[1], icon: 'network' });
-          }
+      const entries = fs.readdirSync('/mnt', { withFileTypes: true });
+      for (const e of entries) {
+        if (e.isDirectory() && /^[a-z]$/.test(e.name)) {
+          locations.push({
+            label: `Windows ${e.name.toUpperCase()}: drive (/mnt/${e.name})`,
+            path: `/mnt/${e.name}`,
+            icon: 'hdd',
+          });
         }
       }
     } catch {}
   }
 
+  // Parse /proc/mounts for real local and network filesystems
+  try {
+    const mounts = fs.readFileSync('/proc/mounts', 'utf8');
+    const NETWORK_FS = new Set(['nfs', 'nfs4', 'cifs', 'smbfs', 'smb3']);
+    const SKIP_FS = new Set(['proc', 'sysfs', 'devtmpfs', 'tmpfs', 'devpts', 'cgroup', 'cgroup2', 'overlay', 'squashfs', 'debugfs', 'tracefs', 'mqueue', 'securityfs', 'pstore', 'bpf', 'autofs', 'binfmt_misc']);
+
+    for (const line of mounts.split('\n')) {
+      const parts = line.trim().split(/\s+/);
+      if (parts.length < 3) continue;
+      const [device, mountPoint, fsType] = parts;
+
+      if (SKIP_FS.has(fsType)) continue;
+      if (mountPoint === '/' || mountPoint.startsWith('/boot') || mountPoint.startsWith('/snap')) continue;
+      if (isWSL && mountPoint.startsWith('/mnt/')) continue; // already added above with friendly labels
+
+      if (NETWORK_FS.has(fsType)) {
+        locations.push({ label: `Network: ${device} (${mountPoint})`, path: mountPoint, icon: 'network' });
+      } else if (mountPoint.startsWith('/media/') || mountPoint.startsWith('/run/media/')) {
+        locations.push({ label: `${path.basename(mountPoint)} (${mountPoint})`, path: mountPoint, icon: 'usb' });
+      }
+    }
+  } catch {}
+
+  // Direct check of /media and /run/media in case /proc/mounts parsing missed anything
+  // (some distros mount removable media slightly differently)
+  for (const base of ['/media', '/run/media']) {
+    try {
+      const topLevel = fs.readdirSync(base, { withFileTypes: true });
+      for (const entry of topLevel) {
+        if (!entry.isDirectory()) continue;
+        const sub = path.join(base, entry.name);
+        try {
+          const subEntries = fs.readdirSync(sub, { withFileTypes: true });
+          // /media/<user>/<device> on some distros — one extra level deep
+          for (const s of subEntries) {
+            if (s.isDirectory()) {
+              const fullPath = path.join(sub, s.name);
+              if (!locations.some(l => l.path === fullPath)) {
+                locations.push({ label: `${s.name} (${fullPath})`, path: fullPath, icon: 'usb' });
+              }
+            }
+          }
+        } catch {}
+      }
+    } catch {}
+  }
+
+  // Network shares declared in /etc/fstab (may not be currently mounted, but
+  // useful to surface as a target the user can still browse to)
+  try {
+    const fstab = fs.readFileSync('/etc/fstab', 'utf8');
+    for (const line of fstab.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      if (trimmed.startsWith('//') || /\bnfs\b/.test(trimmed) || /\bcifs\b/.test(trimmed)) {
+        const parts = trimmed.split(/\s+/);
+        if (parts[1] && parts[1].startsWith('/') && !locations.some(l => l.path === parts[1])) {
+          locations.push({ label: `Network: ${parts[0]} → ${parts[1]}`, path: parts[1], icon: 'network' });
+        }
+      }
+    }
+  } catch {}
+
   return locations;
+}
+
+function formatBytes(bytes) {
+  if (!bytes) return '0 B';
+  const k = 1024, sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
+}
+
+// ── IPC: List subfolders of a directory (for the live folder-tree browser) ───
+ipcMain.handle('fs:listDirectory', async (event, dirPath) => {
+  try {
+    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+    const folders = [];
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      if (entry.name.startsWith('.') && entry.name !== '.') continue; // hide dotfolders by default
+
+      const fullPath = path.join(dirPath, entry.name);
+      let subfolderCount = 0;
+      try {
+        subfolderCount = fs.readdirSync(fullPath, { withFileTypes: true }).filter(e => e.isDirectory()).length;
+      } catch {
+        // permission denied reading inside — still list the folder itself, just can't show a count
+      }
+
+      folders.push({ name: entry.name, path: fullPath, subfolderCount });
+    }
+
+    folders.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+    return { success: true, path: dirPath, folders };
+  } catch (e) {
+    return { success: false, path: dirPath, error: e.code === 'EACCES' ? 'Permission denied' : e.message, folders: [] };
+  }
 });
 
 // ── IPC: Exclusion list (in-memory; persisted properly in Sprint 4) ──────────

@@ -25,27 +25,29 @@ Persistent (in-memory for now — full persistence lands in Sprint 4) exclusion 
 
 ---
 
-## Sprint 2 — Enhanced folder browser (cross-platform modal)
+## Sprint 2 — Enhanced folder browser (cross-platform modal) ✅ COMPLETE
 
-Replaces the current native OS picker + separate Locations button with a single in-app browser modal that works consistently on Windows, Linux, and macOS.
+Replaces the old native OS picker + separate Locations button with a single in-app browser modal that works consistently on Windows, Linux, and macOS.
 
-### 2.1 Platform-aware location detection in `main.js`
+### 2.1 Platform-aware location detection in `main.js` ✅
 
 Three platform branches feeding into one unified location format:
-- **Windows 11** — PowerShell `Get-PSDrive` for local drives, `Get-SmbMapping` for network shares
-- **macOS** — `readdirSync('/Volumes')` gets everything: local drives, USB, network mounts automatically
-- **Linux/WSL** — parse `/proc/mounts`, check `/media`, `/run/media`, `/etc/fstab` for network shares; WSL-specific: expose `/mnt/c`, `/mnt/d` etc. as Windows drive shortcuts
+- **Windows 11** — PowerShell `Get-PSDrive` for local drives (replaces deprecated `wmic`), `Get-SmbMapping` for network shares, both with `wmic`/`net use` as a fallback if PowerShell is unavailable
+- **macOS** — `readdirSync('/Volumes')`, filtering out the boot volume (`Macintosh HD`) to avoid cluttering the list with the entire OS filesystem
+- **Linux/WSL** — parses `/proc/mounts` (skipping virtual filesystems like `proc`, `tmpfs`, `overlay`), checks `/media` and `/run/media` (including the one-level-deeper `/media/<user>/<device>` layout some distros use), reads `/etc/fstab` for declared-but-possibly-unmounted network shares; WSL-specific: detects WSL via `/proc/version` and exposes `/mnt/c`, `/mnt/d` etc. as friendly "Windows C: drive" shortcuts
 
-### 2.2 Custom browser modal — three-panel layout
+### 2.2 Custom browser modal — three-panel layout ✅
 
-Triggered by a single "Browse" button per folder zone, replaces both the native picker and the Locations button:
+`FolderBrowserModal.jsx` — triggered by a single "Browse" button per folder zone:
 - **Left panel** — grouped locations sidebar: Quick access, Local drives, Removable, Network
-- **Centre panel** — live folder tree for the selected location, breadcrumb trail at top, double-click to drill down, back button, shows subfolder count
-- **Right panel** — selected path confirmation, subfolder preview count, "Add folder" button
+- **Centre panel** — live folder tree for the selected location via a new `fs:listDirectory` IPC handler, breadcrumb trail at top (click any segment to jump there), back button, shows subfolder count per entry, double-click to drill down
+- **Right panel** — selected path confirmation with subfolder count, "Add folder" button
 
-Works identically on all three platforms. Drag-and-drop onto zones still works as a secondary option.
+Works identically on all three platforms — the breadcrumb logic correctly parses both `C:\Users\...` and `/home/...` style paths. Drag-and-drop onto zones still works as a secondary option.
 
-**Files:** new `FolderBrowserModal.jsx`, rewrite `main.js` `getLocations`, update `HomeView.jsx` to remove Locations button and wire Browse to modal.
+**Files:** `FolderBrowserModal.jsx` (new), `main.js` `getLocations` rewritten with platform branches + new `fs:listDirectory` handler, `HomeView.jsx` `FolderZone` simplified to a single Browse button wired to the modal, old `LocationPicker.jsx` removed (fully superseded).
+
+**Test coverage:** 14 new tests in `folderBrowserPaths.test.js` covering breadcrumb splitting and parent-path resolution for Windows, POSIX, WSL mount, and macOS `/Volumes` paths. Live smoke-tested `fs:listDirectory` against a real directory tree (subfolder counts, sorting, and the not-found error path).
 
 ---
 
