@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, screen } = require('electron');
 const { Worker } = require('worker_threads');
 const path = require('path');
 const fs = require('fs');
@@ -11,11 +11,36 @@ let activeWorker = null;
 let exclusionList = [...DEFAULT_EXCLUSIONS]; // in-memory for the prototype; Sprint 4 persists this via electron-store
 
 function createWindow() {
+  // IMPORTANT: BrowserWindow width/height are specified in DIPs (device-independent
+  // pixels), and Windows/macOS already render those DIPs at the correct physical
+  // pixel density via OS-level DPI scaling — a 1200-DIP-wide window looks the same
+  // physical size on a 100% and a 200% display. So we must NOT multiply by
+  // scaleFactor directly (that would double-scale: request more DIPs *and* have
+  // the OS scale them up again, producing an oversized window on HiDPI screens).
+  //
+  // What we DO want: on genuinely high-resolution displays (high scaleFactor
+  // generally correlates with a higher-resolution panel — 4K, Retina, etc.) the
+  // user has more physical screen real estate available, so a slightly larger
+  // window in DIP terms is appropriate and won't feel cramped. We apply a gentle,
+  // capped multiplier rather than the raw scaleFactor for this reason.
+  const { scaleFactor, workAreaSize } = screen.getPrimaryDisplay();
+  const sizeFactor = 1 + Math.min(scaleFactor - 1, 1) * 0.15; // e.g. 1.0→1.0, 1.5→1.075, 2.0→1.15
+
+  const BASE_WIDTH = 1200;
+  const BASE_HEIGHT = 800;
+  const BASE_MIN_WIDTH = 900;
+  const BASE_MIN_HEIGHT = 600;
+
+  // Clamp to the display's work area (DIPs) so a small/low-res screen never gets
+  // asked for a window bigger than it can show.
+  const width = Math.min(Math.round(BASE_WIDTH * sizeFactor), workAreaSize.width);
+  const height = Math.min(Math.round(BASE_HEIGHT * sizeFactor), workAreaSize.height);
+
   const win = new BrowserWindow({
-    width: 1200,
-    height: 800,
-    minWidth: 900,
-    minHeight: 600,
+    width,
+    height,
+    minWidth: Math.min(Math.round(BASE_MIN_WIDTH * sizeFactor), workAreaSize.width),
+    minHeight: Math.min(Math.round(BASE_MIN_HEIGHT * sizeFactor), workAreaSize.height),
     backgroundColor: '#0d0f14',
     frame: false,
     webPreferences: {

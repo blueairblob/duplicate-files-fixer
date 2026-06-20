@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import FolderBrowserModal from '../components/FolderBrowserModal.jsx';
 import ExclusionListPanel from '../components/ExclusionListPanel.jsx';
+import { useDPR } from '../contexts/DPRContext.jsx';
 
 const api = window.electronAPI;
 
@@ -29,6 +30,8 @@ const AUTO_MARK_RULES = [
 
 // ── Folder zone — single "Browse" button opens the three-panel modal ─────────
 function FolderZone({ label, sublabel, accent, folders, onAddPath, onRemove }) {
+  const { scale } = useDPR();
+  const { btnSm, btnGhost } = makeStyles(scale);
   const [modalOpen, setModalOpen] = useState(false);
   const [dragging, setDragging] = useState(false);
 
@@ -48,10 +51,10 @@ function FolderZone({ label, sublabel, accent, folders, onAddPath, onRemove }) {
 
   return (
     <div style={{ flex: 1, minWidth: 0 }}>
-      <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
-        <div style={{ width:8, height:8, borderRadius:'50%', background:accent, flexShrink:0 }}/>
-        <span style={{ fontSize:12, fontWeight:600, color:'var(--text-primary)' }}>{label}</span>
-        <span style={{ fontSize:11, color:'var(--text-muted)' }}>{sublabel}</span>
+      <div style={{ display:'flex', alignItems:'center', gap: scale(8), marginBottom: scale(8) }}>
+        <div style={{ width: scale(8), height: scale(8), borderRadius:'50%', background:accent, flexShrink:0 }}/>
+        <span style={{ fontSize: scale(12), fontWeight:600, color:'var(--text-primary)' }}>{label}</span>
+        <span style={{ fontSize: scale(11), color:'var(--text-muted)' }}>{sublabel}</span>
       </div>
 
       <div
@@ -60,30 +63,30 @@ function FolderZone({ label, sublabel, accent, folders, onAddPath, onRemove }) {
         onDrop={handleDrop}
         style={{
           border:`2px dashed ${dragging ? accent : 'var(--border-light)'}`,
-          borderRadius:'var(--radius-md)', padding: folders.length === 0 ? 18 : 10,
+          borderRadius:'var(--radius-md)', padding: scale(folders.length === 0 ? 18 : 10),
           background: dragging ? `${accent}10` : folders.length > 0 ? 'var(--bg-elevated)' : 'transparent',
           transition:'all 0.15s ease', minHeight: 90,
         }}
       >
         {folders.length === 0 ? (
           <div style={{ textAlign:'center' }}>
-            <p style={{ fontSize:12, color:'var(--text-muted)', marginBottom:10 }}>Drop folder here, or</p>
+            <p style={{ fontSize: scale(12), color:'var(--text-muted)', marginBottom: scale(10) }}>Drop folder here, or</p>
             <button onClick={() => setModalOpen(true)} style={{ ...btnSm, borderColor:accent, color:accent }}>📂 Browse</button>
           </div>
         ) : (
-          <div style={{ display:'flex', flexDirection:'column', gap:5 }}>
+          <div style={{ display:'flex', flexDirection:'column', gap: scale(5) }}>
             {folders.map(f => (
               <div key={f} style={{
-                display:'flex', alignItems:'center', gap:8, padding:'5px 10px',
+                display:'flex', alignItems:'center', gap: scale(8), padding: `${scale(5)}px ${scale(10)}px`,
                 background:'var(--bg-surface)', border:'1px solid var(--border)',
                 borderRadius:'var(--radius-sm)',
               }}>
-                <span style={{ fontSize:12 }}>📂</span>
-                <span style={{ fontFamily:'var(--font-mono)', fontSize:10, color:'var(--text-secondary)', flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{f}</span>
-                <button onClick={() => onRemove(f)} style={{ ...btnGhost, fontSize:10, color:'var(--red)', flexShrink:0 }}>✕</button>
+                <span style={{ fontSize: scale(12) }}>📂</span>
+                <span style={{ fontFamily:'var(--font-mono)', fontSize: scale(10), color:'var(--text-secondary)', flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{f}</span>
+                <button onClick={() => onRemove(f)} style={{ ...btnGhost, fontSize: scale(10), color:'var(--red)', flexShrink:0 }}>✕</button>
               </div>
             ))}
-            <button onClick={() => setModalOpen(true)} style={{ ...btnGhost, fontSize:11, color:accent, marginTop:4, alignSelf:'flex-start' }}>+ Browse</button>
+            <button onClick={() => setModalOpen(true)} style={{ ...btnGhost, fontSize: scale(11), color:accent, marginTop: scale(4), alignSelf:'flex-start' }}>+ Browse</button>
           </div>
         )}
       </div>
@@ -103,6 +106,8 @@ function FolderZone({ label, sublabel, accent, folders, onAddPath, onRemove }) {
 
 // ── Main view ─────────────────────────────────────────────────────────────────
 export default function HomeView({ onStartScan }) {
+  const { scale } = useDPR();
+  const { btnPrimary } = makeStyles(scale);
   const [mode, setMode] = useState('compare');
   const [protectedFolders, setProtectedFolders] = useState([]);
   const [targetFolders, setTargetFolders]       = useState([]);
@@ -139,63 +144,63 @@ export default function HomeView({ onStartScan }) {
       {/* Sidebar */}
       <div style={{
         width:200, flexShrink:0, background:'var(--bg-surface)',
-        borderRight:'1px solid var(--border)', padding:'24px 18px',
-        display:'flex', flexDirection:'column', gap:4,
+        borderRight:'1px solid var(--border)', padding:`${scale(24)}px ${scale(18)}px`,
+        display:'flex', flexDirection:'column', gap: scale(4),
       }}>
-        <p style={{ fontSize:10, color:'var(--text-muted)', letterSpacing:'0.08em', marginBottom:16 }}>HOW IT WORKS</p>
+        <p style={{ fontSize: scale(10), color:'var(--text-muted)', letterSpacing:'0.08em', marginBottom: scale(16) }}>HOW IT WORKS</p>
         {[
           { n:'01', title:'Choose mode',   desc:'Simple or compare two locations' },
           { n:'02', title:'Add folders',   desc:'Protected source + target' },
           { n:'03', title:'Set rules',     desc:'Control what gets auto-marked' },
           { n:'04', title:'Scan & review', desc:'Delete with confidence' },
         ].map(({ n, title, desc }, i) => (
-          <div key={n} style={{ display:'flex', gap:10, alignItems:'flex-start', marginBottom:14 }}>
+          <div key={n} style={{ display:'flex', gap: scale(10), alignItems:'flex-start', marginBottom: scale(14) }}>
             <div style={{
-              width:22, height:22, borderRadius:'50%', flexShrink:0,
+              width: scale(22), height: scale(22), borderRadius:'50%', flexShrink:0,
               background: i === 0 ? 'var(--teal-dim)' : 'transparent',
               border:`1.5px solid ${i === 0 ? 'var(--teal)' : 'var(--border-light)'}`,
               display:'flex', alignItems:'center', justifyContent:'center',
-              fontSize:9, fontFamily:'var(--font-mono)',
+              fontSize: scale(9), fontFamily:'var(--font-mono)',
               color: i === 0 ? 'var(--teal)' : 'var(--text-muted)',
             }}>{n}</div>
             <div>
-              <div style={{ fontSize:11, fontWeight:600, color: i === 0 ? 'var(--text-primary)' : 'var(--text-secondary)' }}>{title}</div>
-              <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:2, lineHeight:1.4 }}>{desc}</div>
+              <div style={{ fontSize: scale(11), fontWeight:600, color: i === 0 ? 'var(--text-primary)' : 'var(--text-secondary)' }}>{title}</div>
+              <div style={{ fontSize: scale(10), color:'var(--text-muted)', marginTop: scale(2), lineHeight:1.4 }}>{desc}</div>
             </div>
           </div>
         ))}
-        <div style={{ marginTop:'auto', padding:12, background:'var(--bg-elevated)', borderRadius:'var(--radius-md)', border:'1px solid var(--border)' }}>
-          <div style={{ fontSize:10, color:'var(--text-muted)', marginBottom:4 }}>🔒 Privacy</div>
-          <p style={{ fontSize:10, color:'var(--text-secondary)', lineHeight:1.5 }}>All scanning is local. No files are uploaded.</p>
+        <div style={{ marginTop:'auto', padding: scale(12), background:'var(--bg-elevated)', borderRadius:'var(--radius-md)', border:'1px solid var(--border)' }}>
+          <div style={{ fontSize: scale(10), color:'var(--text-muted)', marginBottom: scale(4) }}>🔒 Privacy</div>
+          <p style={{ fontSize: scale(10), color:'var(--text-secondary)', lineHeight:1.5 }}>All scanning is local. No files are uploaded.</p>
         </div>
       </div>
 
       {/* Main */}
-      <div style={{ flex:1, padding:'24px 28px', overflowY:'auto', display:'flex', flexDirection:'column', gap:22 }}>
+      <div style={{ flex:1, padding:`${scale(24)}px ${scale(28)}px`, overflowY:'auto', display:'flex', flexDirection:'column', gap: scale(22) }}>
 
         <div>
-          <h1 style={{ fontSize:21, fontWeight:700, marginBottom:4 }}>Find duplicate files</h1>
+          <h1 style={{ fontSize: scale(21), fontWeight:700, marginBottom: scale(4) }}>Find duplicate files</h1>
           <p style={{ color:'var(--text-secondary)', fontSize:13 }}>Choose a scan mode, add folders, and configure your rules.</p>
         </div>
 
         {/* Mode toggle */}
         <div>
           <Label>Scan mode</Label>
-          <div style={{ display:'flex', gap:10 }}>
+          <div style={{ display:'flex', gap: scale(10) }}>
             {[
               { id:'compare', icon:'⚖', title:'Compare locations', desc:'Protected source vs. target — recommended' },
               { id:'simple',  icon:'🔍', title:'Simple scan',       desc:'Find all dupes within a folder set' },
             ].map(({ id, icon, title, desc }) => (
               <button key={id} onClick={() => setMode(id)} style={{
-                flex:1, padding:'12px 14px', textAlign:'left',
+                flex:1, padding:`${scale(12)}px ${scale(14)}px`, textAlign:'left',
                 borderRadius:'var(--radius-md)',
                 border:`1.5px solid ${mode === id ? 'var(--teal)' : 'var(--border)'}`,
                 background: mode === id ? 'var(--teal-dim)' : 'var(--bg-elevated)',
                 cursor:'pointer',
               }}>
-                <div style={{ fontSize:15, marginBottom:4 }}>{icon}</div>
-                <div style={{ fontSize:12, fontWeight:600, color: mode === id ? 'var(--teal)' : 'var(--text-primary)', marginBottom:3 }}>{title}</div>
-                <div style={{ fontSize:11, color:'var(--text-muted)', lineHeight:1.4 }}>{desc}</div>
+                <div style={{ fontSize: scale(15), marginBottom: scale(4) }}>{icon}</div>
+                <div style={{ fontSize: scale(12), fontWeight:600, color: mode === id ? 'var(--teal)' : 'var(--text-primary)', marginBottom: scale(3) }}>{title}</div>
+                <div style={{ fontSize: scale(11), color:'var(--text-muted)', lineHeight:1.4 }}>{desc}</div>
               </button>
             ))}
           </div>
@@ -206,7 +211,7 @@ export default function HomeView({ onStartScan }) {
           <div>
             <Label>Folder locations</Label>
             <div style={{
-              display:'flex', gap:12, padding:14,
+              display:'flex', gap: scale(12), padding: scale(14),
               background:'var(--bg-elevated)', border:'1px solid var(--border)',
               borderRadius:'var(--radius-md)',
             }}>
@@ -217,7 +222,7 @@ export default function HomeView({ onStartScan }) {
                 onRemove={f => setProtectedFolders(prev => prev.filter(x => x !== f))}
               />
               <div style={{ width:1, background:'var(--border)', display:'flex', alignItems:'center', justifyContent:'center', position:'relative' }}>
-                <div style={{ position:'absolute', background:'var(--bg-elevated)', padding:'4px 6px', fontSize:10, color:'var(--text-muted)', border:'1px solid var(--border)', borderRadius:4 }}>vs</div>
+                <div style={{ position:'absolute', background:'var(--bg-elevated)', padding:`${scale(4)}px ${scale(6)}px`, fontSize: scale(10), color:'var(--text-muted)', border:'1px solid var(--border)', borderRadius: 4 }}>vs</div>
               </div>
               <FolderZone
                 label="Scan target" sublabel="— dupes marked for deletion" accent="var(--red)"
@@ -243,19 +248,19 @@ export default function HomeView({ onStartScan }) {
         {mode === 'compare' && (
           <div>
             <Label>Auto-mark rule</Label>
-            <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+            <div style={{ display:'flex', flexDirection:'column', gap: scale(6) }}>
               {AUTO_MARK_RULES.map(({ id, label, desc }) => (
                 <label key={id} style={{
-                  display:'flex', alignItems:'flex-start', gap:10, padding:'9px 12px',
+                  display:'flex', alignItems:'flex-start', gap: scale(10), padding:`${scale(9)}px ${scale(12)}px`,
                   border:`1px solid ${autoMarkRule === id ? 'var(--teal)' : 'var(--border)'}`,
                   background: autoMarkRule === id ? 'var(--teal-dim)' : 'var(--bg-elevated)',
                   borderRadius:'var(--radius-sm)', cursor:'pointer',
                 }}>
                   <input type="radio" name="rule" value={id} checked={autoMarkRule === id}
-                    onChange={() => setAutoMarkRule(id)} style={{ marginTop:2, accentColor:'var(--teal)' }}/>
+                    onChange={() => setAutoMarkRule(id)} style={{ marginTop: scale(2), accentColor:'var(--teal)' }}/>
                   <div>
-                    <div style={{ fontSize:12, fontWeight:500, color: autoMarkRule === id ? 'var(--teal)' : 'var(--text-primary)' }}>{label}</div>
-                    <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:2 }}>{desc}</div>
+                    <div style={{ fontSize: scale(12), fontWeight:500, color: autoMarkRule === id ? 'var(--teal)' : 'var(--text-primary)' }}>{label}</div>
+                    <div style={{ fontSize: scale(11), color:'var(--text-muted)', marginTop: scale(2) }}>{desc}</div>
                   </div>
                 </label>
               ))}
@@ -266,16 +271,16 @@ export default function HomeView({ onStartScan }) {
         {/* File types */}
         <div>
           <Label>File types</Label>
-          <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+          <div style={{ display:'flex', gap: scale(8), flexWrap:'wrap' }}>
             {FILE_TYPES.map(({ id, label, icon }) => {
               const active = types.includes(id);
               return (
                 <button key={id} onClick={() => toggleType(id)} style={{
-                  padding:'6px 12px', borderRadius:'var(--radius-sm)', fontSize:12, fontWeight:500,
+                  padding:`${scale(6)}px ${scale(12)}px`, borderRadius:'var(--radius-sm)', fontSize: scale(12), fontWeight:500,
                   border:`1px solid ${active ? 'var(--teal)' : 'var(--border)'}`,
                   background: active ? 'var(--teal-dim)' : 'var(--bg-elevated)',
                   color: active ? 'var(--teal)' : 'var(--text-secondary)',
-                  display:'flex', alignItems:'center', gap:6, cursor:'pointer',
+                  display:'flex', alignItems:'center', gap: scale(6), cursor:'pointer',
                 }}>
                   {icon} {label}
                 </button>
@@ -290,7 +295,7 @@ export default function HomeView({ onStartScan }) {
           <select value={minSize} onChange={e => setMinSize(Number(e.target.value))} style={{
             background:'var(--bg-elevated)', border:'1px solid var(--border)',
             borderRadius:'var(--radius-sm)', color:'var(--text-primary)',
-            padding:'7px 12px', fontSize:12, width:180,
+            padding:`${scale(7)}px ${scale(12)}px`, fontSize: scale(12), width:180,
           }}>
             {SIZE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
@@ -298,16 +303,16 @@ export default function HomeView({ onStartScan }) {
 
         {/* Zero-byte files */}
         <div>
-          <label style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer', width:'fit-content' }}>
+          <label style={{ display:'flex', alignItems:'center', gap: scale(8), cursor:'pointer', width:'fit-content' }}>
             <input
               type="checkbox"
               checked={includeEmpty}
               onChange={e => setIncludeEmpty(e.target.checked)}
               style={{ accentColor: 'var(--teal)' }}
             />
-            <span style={{ fontSize:12, color:'var(--text-secondary)' }}>Include empty (zero-byte) files</span>
+            <span style={{ fontSize: scale(12), color:'var(--text-secondary)' }}>Include empty (zero-byte) files</span>
           </label>
-          <p style={{ fontSize:10, color:'var(--text-muted)', marginTop:4, marginLeft:22 }}>
+          <p style={{ fontSize: scale(10), color:'var(--text-muted)', marginTop: scale(4), marginLeft: scale(22) }}>
             Grouped separately by name — never mixed with content-based duplicates.
           </p>
         </div>
@@ -319,15 +324,15 @@ export default function HomeView({ onStartScan }) {
         </div>
 
         {/* Start */}
-        <div style={{ paddingBottom:20 }}>
+        <div style={{ paddingBottom: scale(20) }}>
           <button onClick={handleStart} disabled={!canScan} style={{
-            ...btnPrimary, fontSize:14, padding:'11px 30px',
+            ...btnPrimary, fontSize: scale(14), padding:`${scale(11)}px ${scale(30)}px`,
             opacity: canScan ? 1 : 0.4, cursor: canScan ? 'pointer' : 'not-allowed',
           }}>
             Start Scan →
           </button>
           {!canScan && (
-            <p style={{ marginTop:8, fontSize:11, color:'var(--text-muted)' }}>
+            <p style={{ marginTop: scale(8), fontSize: scale(11), color:'var(--text-muted)' }}>
               {mode === 'compare' ? 'Add at least one protected source and one target.' : 'Add at least one folder.'}
             </p>
           )}
@@ -338,9 +343,16 @@ export default function HomeView({ onStartScan }) {
 }
 
 function Label({ children }) {
-  return <p style={{ fontSize:10, fontWeight:600, color:'var(--text-secondary)', letterSpacing:'0.06em', marginBottom:8, textTransform:'uppercase' }}>{children}</p>;
+  const { scale } = useDPR();
+  return <p style={{ fontSize: scale(10), fontWeight: 600, color: 'var(--text-secondary)', letterSpacing: '0.06em', marginBottom: scale(8), textTransform: 'uppercase' }}>{children}</p>;
 }
 
-const btnPrimary = { background:'var(--teal)', color:'#0d0f14', border:'none', borderRadius:'var(--radius-sm)', padding:'8px 18px', fontSize:12, fontWeight:600, cursor:'pointer' };
-const btnSm      = { background:'transparent', borderRadius:'var(--radius-sm)', border:'1px solid var(--border)', padding:'5px 12px', fontSize:11, cursor:'pointer' };
-const btnGhost   = { background:'transparent', border:'none', borderRadius:'var(--radius-sm)', cursor:'pointer', fontSize:12, color:'var(--text-muted)' };
+// Shared button styles, derived from the current DPR scale. Both HomeView and
+// the FolderZone child component call this with their own useDPR().scale.
+function makeStyles(scale) {
+  return {
+    btnPrimary: { background: 'var(--teal)', color: '#0d0f14', border: 'none', borderRadius: 'var(--radius-sm)', padding: `${scale(8)}px ${scale(18)}px`, fontSize: scale(12), fontWeight: 600, cursor: 'pointer' },
+    btnSm:      { background: 'transparent', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', padding: `${scale(5)}px ${scale(12)}px`, fontSize: scale(11), cursor: 'pointer' },
+    btnGhost:   { background: 'transparent', border: 'none', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: scale(12), color: 'var(--text-muted)' },
+  };
+}

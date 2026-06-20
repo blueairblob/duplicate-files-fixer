@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import { useDPR } from '../contexts/DPRContext.jsx';
 
 const api = window.electronAPI;
 
@@ -88,6 +89,7 @@ function parentOf(p) {
 }
 
 export default function FolderBrowserModal({ title, accent, onConfirm, onClose }) {
+  const { scale } = useDPR();
   const [locations, setLocations] = useState([]);
   const [loadingLocations, setLoadingLocations] = useState(true);
 
@@ -184,17 +186,17 @@ export default function FolderBrowserModal({ title, accent, onConfirm, onClose }
       >
         {/* Header */}
         <div style={{
-          padding: '14px 20px',
+          padding: `${scale(14)}px ${scale(20)}px`,
           borderBottom: '1px solid var(--border)',
-          display: 'flex', alignItems: 'center', gap: 10,
+          display: 'flex', alignItems: 'center', gap: scale(10),
         }}>
-          <div style={{ width: 8, height: 8, borderRadius: '50%', background: accent }} />
-          <span style={{ fontSize: 14, fontWeight: 600 }}>{title || 'Choose a folder'}</span>
+          <div style={{ width: scale(8), height: scale(8), borderRadius: '50%', background: accent }} />
+          <span style={{ fontSize: scale(14), fontWeight: 600 }}>{title || 'Choose a folder'}</span>
           <button
             onClick={onClose}
             style={{
               marginLeft: 'auto', background: 'transparent', border: 'none',
-              color: 'var(--text-muted)', fontSize: 16, cursor: 'pointer', padding: '0 4px',
+              color: 'var(--text-muted)', fontSize: scale(16), cursor: 'pointer', padding: `0 ${scale(4)}px`,
             }}
           >✕</button>
         </div>
@@ -206,16 +208,16 @@ export default function FolderBrowserModal({ title, accent, onConfirm, onClose }
           <div style={{
             width: 200, flexShrink: 0,
             borderRight: '1px solid var(--border)',
-            overflowY: 'auto', padding: '10px 0',
+            overflowY: 'auto', padding: `${scale(10)}px 0`,
             background: 'var(--bg-surface)',
           }}>
             {loadingLocations ? (
-              <div style={{ padding: 16, fontSize: 12, color: 'var(--text-muted)' }}>Loading…</div>
+              <div style={{ padding: scale(16), fontSize: scale(12), color: 'var(--text-muted)' }}>Loading…</div>
             ) : (
               groups.map(({ name, items }) => (
-                <div key={name} style={{ marginBottom: 10 }}>
+                <div key={name} style={{ marginBottom: scale(10) }}>
                   <div style={{
-                    padding: '4px 14px', fontSize: 9, fontWeight: 700,
+                    padding: `${scale(4)}px ${scale(14)}px`, fontSize: scale(9), fontWeight: 700,
                     color: 'var(--text-muted)', letterSpacing: '0.08em', textTransform: 'uppercase',
                   }}>{name}</div>
                   {items.map(loc => (
@@ -223,19 +225,19 @@ export default function FolderBrowserModal({ title, accent, onConfirm, onClose }
                       key={loc.path}
                       onClick={() => handleSelectLocation(loc)}
                       style={{
-                        display: 'flex', alignItems: 'center', gap: 8,
-                        width: '100%', padding: '6px 14px',
+                        display: 'flex', alignItems: 'center', gap: scale(8),
+                        width: '100%', padding: `${scale(6)}px ${scale(14)}px`,
                         background: selectedPath === loc.path || currentPath === loc.path ? 'var(--bg-hover)' : 'transparent',
                         border: 'none', cursor: 'pointer', textAlign: 'left',
                       }}
                       onMouseEnter={e => { if (currentPath !== loc.path) e.currentTarget.style.background = 'var(--bg-hover)'; }}
                       onMouseLeave={e => { if (currentPath !== loc.path) e.currentTarget.style.background = 'transparent'; }}
                     >
-                      <span style={{ fontSize: 13, width: 16, textAlign: 'center', flexShrink: 0 }}>
+                      <span style={{ fontSize: scale(13), width: scale(16), textAlign: 'center', flexShrink: 0 }}>
                         {ICON_MAP[loc.icon] || '📁'}
                       </span>
                       <span style={{
-                        fontSize: 11.5, color: 'var(--text-secondary)',
+                        fontSize: scale(11.5), color: 'var(--text-secondary)',
                         whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                       }}>{loc.label}</span>
                     </button>
@@ -251,8 +253,8 @@ export default function FolderBrowserModal({ title, accent, onConfirm, onClose }
               <>
                 {/* Breadcrumb + back */}
                 <div style={{
-                  display: 'flex', alignItems: 'center', gap: 6,
-                  padding: '10px 14px', borderBottom: '1px solid var(--border)',
+                  display: 'flex', alignItems: 'center', gap: scale(6),
+                  padding: `${scale(10)}px ${scale(14)}px`, borderBottom: '1px solid var(--border)',
                   flexShrink: 0, overflowX: 'auto',
                 }}>
                   <button
@@ -261,12 +263,12 @@ export default function FolderBrowserModal({ title, accent, onConfirm, onClose }
                     style={{
                       background: 'transparent', border: '1px solid var(--border)',
                       borderRadius: 'var(--radius-sm)', color: 'var(--text-secondary)',
-                      width: 24, height: 24, flexShrink: 0, cursor: parentOf(currentPath) ? 'pointer' : 'default',
+                      width: scale(24), height: scale(24), flexShrink: 0, cursor: parentOf(currentPath) ? 'pointer' : 'default',
                       opacity: parentOf(currentPath) ? 1 : 0.3,
-                      fontSize: 12,
+                      fontSize: scale(12),
                     }}
                   >←</button>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, whiteSpace: 'nowrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: scale(4), fontSize: scale(11), whiteSpace: 'nowrap' }}>
                     {breadcrumbs.map((crumb, i) => (
                       <React.Fragment key={crumb.path}>
                         {i > 0 && <span style={{ color: 'var(--text-muted)' }}>/</span>}
@@ -276,7 +278,7 @@ export default function FolderBrowserModal({ title, accent, onConfirm, onClose }
                             background: 'transparent', border: 'none', cursor: 'pointer',
                             color: i === breadcrumbs.length - 1 ? 'var(--text-primary)' : 'var(--text-muted)',
                             fontWeight: i === breadcrumbs.length - 1 ? 600 : 400,
-                            fontFamily: 'var(--font-mono)', padding: '2px 4px',
+                            fontFamily: 'var(--font-mono)', padding: `${scale(2)}px ${scale(4)}px`,
                           }}
                         >{crumb.label}</button>
                       </React.Fragment>
@@ -285,13 +287,13 @@ export default function FolderBrowserModal({ title, accent, onConfirm, onClose }
                 </div>
 
                 {/* Folder list */}
-                <div style={{ flex: 1, overflowY: 'auto', padding: '6px 0' }}>
+                <div style={{ flex: 1, overflowY: 'auto', padding: `${scale(6)}px 0` }}>
                   {loadingFolders ? (
-                    <div style={{ padding: 20, fontSize: 12, color: 'var(--text-muted)', textAlign: 'center' }}>Loading…</div>
+                    <div style={{ padding: scale(20), fontSize: scale(12), color: 'var(--text-muted)', textAlign: 'center' }}>Loading…</div>
                   ) : dirError ? (
-                    <div style={{ padding: 20, fontSize: 12, color: 'var(--amber)', textAlign: 'center' }}>⚠ {dirError}</div>
+                    <div style={{ padding: scale(20), fontSize: scale(12), color: 'var(--amber)', textAlign: 'center' }}>⚠ {dirError}</div>
                   ) : folders.length === 0 ? (
-                    <div style={{ padding: 20, fontSize: 12, color: 'var(--text-muted)', textAlign: 'center' }}>No subfolders here</div>
+                    <div style={{ padding: scale(20), fontSize: scale(12), color: 'var(--text-muted)', textAlign: 'center' }}>No subfolders here</div>
                   ) : (
                     folders.map(folder => (
                       <button
@@ -299,28 +301,28 @@ export default function FolderBrowserModal({ title, accent, onConfirm, onClose }
                         onDoubleClick={() => handleDrillInto(folder)}
                         onClick={() => { setSelectedPath(folder.path); setSelectedSubcount(folder.subfolderCount); }}
                         style={{
-                          display: 'flex', alignItems: 'center', gap: 10,
-                          width: '100%', padding: '8px 16px',
+                          display: 'flex', alignItems: 'center', gap: scale(10),
+                          width: '100%', padding: `${scale(8)}px ${scale(16)}px`,
                           background: selectedPath === folder.path ? 'var(--teal-dim)' : 'transparent',
                           border: 'none', cursor: 'pointer', textAlign: 'left',
                         }}
                         onMouseEnter={e => { if (selectedPath !== folder.path) e.currentTarget.style.background = 'var(--bg-hover)'; }}
                         onMouseLeave={e => { if (selectedPath !== folder.path) e.currentTarget.style.background = 'transparent'; }}
                       >
-                        <span style={{ fontSize: 14 }}>📁</span>
+                        <span style={{ fontSize: scale(14) }}>📁</span>
                         <span style={{
-                          flex: 1, fontSize: 12.5,
+                          flex: 1, fontSize: scale(12.5),
                           color: selectedPath === folder.path ? 'var(--teal)' : 'var(--text-primary)',
                           whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                         }}>{folder.name}</span>
                         {folder.subfolderCount > 0 && (
-                          <span style={{ fontSize: 10, color: 'var(--text-muted)', flexShrink: 0 }}>
+                          <span style={{ fontSize: scale(10), color: 'var(--text-muted)', flexShrink: 0 }}>
                             {folder.subfolderCount} subfolder{folder.subfolderCount !== 1 ? 's' : ''}
                           </span>
                         )}
                         <span
                           onClick={(e) => { e.stopPropagation(); handleDrillInto(folder); }}
-                          style={{ fontSize: 11, color: 'var(--text-muted)', flexShrink: 0, padding: '0 4px' }}
+                          style={{ fontSize: scale(11), color: 'var(--text-muted)', flexShrink: 0, padding: `0 ${scale(4)}px` }}
                         >▸</span>
                       </button>
                     ))
@@ -330,7 +332,7 @@ export default function FolderBrowserModal({ title, accent, onConfirm, onClose }
             ) : (
               <div style={{
                 flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                color: 'var(--text-muted)', fontSize: 12, textAlign: 'center', padding: 20,
+                color: 'var(--text-muted)', fontSize: scale(12), textAlign: 'center', padding: scale(20),
               }}>
                 Choose a location on the left to start browsing
               </div>
@@ -341,34 +343,34 @@ export default function FolderBrowserModal({ title, accent, onConfirm, onClose }
           <div style={{
             width: 220, flexShrink: 0,
             borderLeft: '1px solid var(--border)',
-            padding: 16, display: 'flex', flexDirection: 'column', gap: 14,
+            padding: scale(16), display: 'flex', flexDirection: 'column', gap: scale(14),
             background: 'var(--bg-surface)',
           }}>
             <div>
-              <p style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-muted)', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 8 }}>
+              <p style={{ fontSize: scale(10), fontWeight: 600, color: 'var(--text-muted)', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: scale(8) }}>
                 Selected folder
               </p>
               {selectedPath ? (
                 <div style={{
                   background: 'var(--bg-elevated)', border: '1px solid var(--border)',
-                  borderRadius: 'var(--radius-sm)', padding: '10px 12px',
+                  borderRadius: 'var(--radius-sm)', padding: `${scale(10)}px ${scale(12)}px`,
                 }}>
                   <div style={{
-                    fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-primary)',
+                    fontFamily: 'var(--font-mono)', fontSize: scale(11), color: 'var(--text-primary)',
                     wordBreak: 'break-all', lineHeight: 1.5,
                   }}>{selectedPath}</div>
                   {selectedSubcount != null && (
-                    <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 6 }}>
+                    <div style={{ fontSize: scale(10), color: 'var(--text-muted)', marginTop: scale(6) }}>
                       {selectedSubcount} subfolder{selectedSubcount !== 1 ? 's' : ''}
                     </div>
                   )}
                 </div>
               ) : (
-                <p style={{ fontSize: 11, color: 'var(--text-muted)' }}>Nothing selected yet</p>
+                <p style={{ fontSize: scale(11), color: 'var(--text-muted)' }}>Nothing selected yet</p>
               )}
             </div>
 
-            <p style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+            <p style={{ fontSize: scale(10), color: 'var(--text-muted)', lineHeight: 1.5 }}>
               Double-click a folder to open it. Single-click to select it for scanning.
             </p>
 
@@ -380,7 +382,7 @@ export default function FolderBrowserModal({ title, accent, onConfirm, onClose }
                 background: selectedPath ? accent : 'var(--bg-elevated)',
                 color: selectedPath ? '#0d0f14' : 'var(--text-muted)',
                 border: 'none', borderRadius: 'var(--radius-sm)',
-                padding: '10px 14px', fontSize: 12, fontWeight: 600,
+                padding: `${scale(10)}px ${scale(14)}px`, fontSize: scale(12), fontWeight: 600,
                 cursor: selectedPath ? 'pointer' : 'not-allowed',
               }}
             >

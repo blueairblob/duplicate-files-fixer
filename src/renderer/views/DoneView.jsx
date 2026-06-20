@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useDPR } from '../contexts/DPRContext.jsx';
 
 function formatSize(bytes) {
   if (!bytes || bytes === 0) return '0 B';
@@ -9,6 +10,7 @@ function formatSize(bytes) {
 }
 
 export default function DoneView({ deleteResult, onScanAgain }) {
+  const { scale } = useDPR();
   const { deleted = [], failed = [], quarantined = [], markedBytes = 0, totalScanned = 0 } = deleteResult || {};
   const [count, setCount] = useState(0);
 
@@ -30,12 +32,12 @@ export default function DoneView({ deleteResult, onScanAgain }) {
     <div style={{
       height: '100%',
       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-      gap: 28, padding: 40,
+      gap: scale(28), padding: scale(40),
     }}>
 
       {/* Success ring */}
-      <div style={{ position: 'relative', width: 120, height: 120 }}>
-        <svg width="120" height="120" viewBox="0 0 120 120">
+      <div style={{ position: 'relative', width: scale(120), height: scale(120) }}>
+        <svg width={scale(120)} height={scale(120)} viewBox="0 0 120 120">
           <circle cx="60" cy="60" r="52" fill="none" stroke="var(--border)" strokeWidth="2"/>
           <circle
             cx="60" cy="60" r="52"
@@ -52,17 +54,17 @@ export default function DoneView({ deleteResult, onScanAgain }) {
           position: 'absolute', inset: 0,
           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
         }}>
-          <div style={{ fontSize: 28, fontWeight: 700, color: 'var(--teal)', fontFamily: 'var(--font-mono)' }}>{count}</div>
-          <div style={{ fontSize: 9, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>DELETED</div>
+          <div style={{ fontSize: scale(28), fontWeight: 700, color: 'var(--teal)', fontFamily: 'var(--font-mono)' }}>{count}</div>
+          <div style={{ fontSize: scale(9), color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>DELETED</div>
         </div>
       </div>
 
       {/* Headline */}
       <div style={{ textAlign: 'center' }}>
-        <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 6 }}>
+        <h2 style={{ fontSize: scale(22), fontWeight: 700, marginBottom: scale(6) }}>
           {deleted.length > 0 ? 'All cleaned up' : 'Nothing was deleted'}
         </h2>
-        <p style={{ color: 'var(--text-secondary)', fontSize: 13 }}>
+        <p style={{ color: 'var(--text-secondary)', fontSize: scale(13) }}>
           {deleted.length > 0
             ? `Moved ${deleted.length} file${deleted.length !== 1 ? 's' : ''} to the Recycle Bin`
             : 'No files were selected for deletion.'}
@@ -71,7 +73,7 @@ export default function DoneView({ deleteResult, onScanAgain }) {
 
       {/* Stats */}
       <div style={{
-        display: 'flex', gap: 16,
+        display: 'flex', gap: scale(16),
         background: 'var(--bg-surface)',
         border: '1px solid var(--border)',
         borderRadius: 'var(--radius-md)',
@@ -83,9 +85,9 @@ export default function DoneView({ deleteResult, onScanAgain }) {
           { label: 'Failed', value: failed.length, color: failed.length > 0 ? 'var(--red)' : 'var(--text-muted)' },
           { label: 'Files scanned', value: totalScanned.toLocaleString(), color: 'var(--text-primary)' },
         ].map(({ label, value, color }) => (
-          <div key={label} style={{ padding: '20px 24px', textAlign: 'center', borderRight: '1px solid var(--border)' }}>
-            <div style={{ fontSize: 22, fontWeight: 700, color, fontFamily: 'var(--font-mono)' }}>{value}</div>
-            <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{label}</div>
+          <div key={label} style={{ padding: `${scale(20)}px ${scale(24)}px`, textAlign: 'center', borderRight: '1px solid var(--border)' }}>
+            <div style={{ fontSize: scale(22), fontWeight: 700, color, fontFamily: 'var(--font-mono)' }}>{value}</div>
+            <div style={{ fontSize: scale(10), color: 'var(--text-muted)', marginTop: scale(4), textTransform: 'uppercase', letterSpacing: '0.06em' }}>{label}</div>
           </div>
         ))}
       </div>
@@ -96,8 +98,8 @@ export default function DoneView({ deleteResult, onScanAgain }) {
           background: 'var(--teal-dim)',
           border: '1px solid var(--teal)',
           borderRadius: 'var(--radius-sm)',
-          padding: '10px 18px',
-          fontSize: 12, color: 'var(--teal)',
+          padding: `${scale(10)}px ${scale(18)}px`,
+          fontSize: scale(12), color: 'var(--teal)',
           maxWidth: 400, textAlign: 'center',
         }}>
           ♻ Files were moved to the Recycle Bin — you can still recover them if needed.
@@ -109,8 +111,8 @@ export default function DoneView({ deleteResult, onScanAgain }) {
           background: 'var(--amber-dim)',
           border: '1px solid var(--amber)',
           borderRadius: 'var(--radius-sm)',
-          padding: '10px 18px',
-          fontSize: 12, color: 'var(--amber)',
+          padding: `${scale(10)}px ${scale(18)}px`,
+          fontSize: scale(12), color: 'var(--amber)',
           maxWidth: 440, textAlign: 'center',
         }}>
           🛡 {quarantined.length} file{quarantined.length !== 1 ? 's' : ''} couldn't reach the system Recycle Bin
@@ -122,13 +124,13 @@ export default function DoneView({ deleteResult, onScanAgain }) {
       {failed.length > 0 && (
         <div style={{
           background: 'var(--red-dim)', border: '1px solid var(--red)',
-          borderRadius: 'var(--radius-sm)', padding: '10px 18px',
-          fontSize: 11, color: 'var(--red)', maxWidth: 440,
+          borderRadius: 'var(--radius-sm)', padding: `${scale(10)}px ${scale(18)}px`,
+          fontSize: scale(11), color: 'var(--red)', maxWidth: 440,
         }}>
           <strong>{failed.length} file{failed.length !== 1 ? 's' : ''} could not be deleted.</strong>
-          <div style={{ marginTop: 6 }}>
+          <div style={{ marginTop: scale(6) }}>
             {failed.slice(0, 3).map(f => (
-              <div key={f.path} style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-secondary)', marginTop: 2 }}>
+              <div key={f.path} style={{ fontFamily: 'var(--font-mono)', fontSize: scale(10), color: 'var(--text-secondary)', marginTop: scale(2) }}>
                 {f.path}: {f.error}
               </div>
             ))}
@@ -143,8 +145,8 @@ export default function DoneView({ deleteResult, onScanAgain }) {
           color: '#0d0f14',
           border: 'none',
           borderRadius: 'var(--radius-sm)',
-          padding: '11px 28px',
-          fontSize: 13,
+          padding: `${scale(11)}px ${scale(28)}px`,
+          fontSize: scale(13),
           fontWeight: 600,
           cursor: 'pointer',
         }}

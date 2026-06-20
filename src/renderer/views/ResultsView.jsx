@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useCallback } from 'react';
+import { useDPR } from '../contexts/DPRContext.jsx';
 
 const api = window.electronAPI;
 
@@ -25,6 +26,8 @@ function fileIcon(ext) {
 }
 
 export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, onBack }) {
+  const { scale } = useDPR();
+  const { labelStyle, btnPrimary, btnSecondary, btnDanger, btnGhost } = makeStyles(scale);
   const { groups = [], totalScanned = 0, totalHashed = 0, mode, warnings = [] } = scanResult;
   const { autoMarkRule } = scanConfig || {};
 
@@ -88,16 +91,16 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
 
   if (groups.length === 0) {
     return (
-      <div style={{ height:'100%', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:16 }}>
-        <div style={{ fontSize: 48 }}>✅</div>
-        <h2 style={{ fontSize: 20, fontWeight: 600 }}>No duplicates found</h2>
+      <div style={{ height:'100%', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap: scale(16) }}>
+        <div style={{ fontSize: scale(48) }}>✅</div>
+        <h2 style={{ fontSize: scale(20), fontWeight: 600 }}>No duplicates found</h2>
         <p style={{ color: 'var(--text-secondary)' }}>Scanned {totalScanned.toLocaleString()} files — everything looks clean.</p>
         {warnings.length > 0 && (
           <div style={{
             background:'var(--amber-dim)', border:'1px solid var(--amber)',
-            borderRadius:'var(--radius-sm)', padding:'10px 16px', maxWidth: 440,
+            borderRadius:'var(--radius-sm)', padding:`${scale(10)}px ${scale(16)}px`, maxWidth: 440,
           }}>
-            <p style={{ fontSize: 12, color: 'var(--amber)', fontWeight: 600 }}>
+            <p style={{ fontSize: scale(12), color: 'var(--amber)', fontWeight: 600 }}>
               ⚠ {warnings.length} item{warnings.length !== 1 ? 's' : ''} skipped during scan
             </p>
           </div>
@@ -112,28 +115,28 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
 
       {/* ── Top bar ── */}
       <div style={{
-        padding: '12px 20px', background: 'var(--bg-surface)',
+        padding: `${scale(12)}px ${scale(20)}px`, background: 'var(--bg-surface)',
         borderBottom: '1px solid var(--border)',
-        display: 'flex', alignItems: 'center', gap: 14, flexShrink: 0,
+        display: 'flex', alignItems: 'center', gap: scale(14), flexShrink: 0,
       }}>
-        <button onClick={onBack} style={{ ...btnGhost, fontSize: 18, padding: '0 6px' }}>←</button>
+        <button onClick={onBack} style={{ ...btnGhost, fontSize: scale(18), padding: `0 ${scale(6)}px` }}>←</button>
         <div>
-          <span style={{ fontSize: 14, fontWeight: 600 }}>{groups.length} duplicate groups</span>
-          <span style={{ color: 'var(--text-muted)', fontSize: 12, marginLeft: 10 }}>
+          <span style={{ fontSize: scale(14), fontWeight: 600 }}>{groups.length} duplicate groups</span>
+          <span style={{ color: 'var(--text-muted)', fontSize: scale(12), marginLeft: scale(10) }}>
             {totalDupes} redundant files · {totalScanned.toLocaleString()} scanned
           </span>
         </div>
         {mode === 'compare' && (
-          <div style={{ display:'flex', gap:10, marginLeft: 8 }}>
-            <span style={{ fontSize: 11, color:'var(--teal)', background:'var(--teal-dim)', border:'1px solid var(--teal)', borderRadius:4, padding:'2px 8px' }}>
+          <div style={{ display:'flex', gap: scale(10), marginLeft: scale(8) }}>
+            <span style={{ fontSize: scale(11), color:'var(--teal)', background:'var(--teal-dim)', border:'1px solid var(--teal)', borderRadius:4, padding:`${scale(2)}px ${scale(8)}px` }}>
               🛡 Protected source active
             </span>
-            <span style={{ fontSize: 11, color:'var(--text-muted)' }}>
+            <span style={{ fontSize: scale(11), color:'var(--text-muted)' }}>
               Rule: <strong style={{ color:'var(--text-secondary)' }}>{autoMarkRule}</strong>
             </span>
           </div>
         )}
-        <div style={{ marginLeft:'auto', display:'flex', gap:8, alignItems:'center' }}>
+        <div style={{ marginLeft:'auto', display:'flex', gap: scale(8), alignItems:'center' }}>
           <input
             placeholder="Search files…"
             value={search}
@@ -141,7 +144,7 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
             style={{
               background:'var(--bg-elevated)', border:'1px solid var(--border)',
               borderRadius:'var(--radius-sm)', color:'var(--text-primary)',
-              padding:'6px 12px', fontSize: 12, width: 200,
+              padding:`${scale(6)}px ${scale(12)}px`, fontSize: scale(12), width: 200,
             }}
           />
           <button onClick={autoMarkAll} style={btnSecondary}>Auto-mark</button>
@@ -153,7 +156,7 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
       <div style={{ flex:1, display:'flex', overflow:'hidden' }}>
 
         {/* Groups */}
-        <div style={{ flex:1, overflowY:'auto', padding:'14px 20px' }}>
+        <div style={{ flex:1, overflowY:'auto', padding:`${scale(14)}px ${scale(20)}px` }}>
           {filteredGroups.map(group => {
             const isExpanded = expanded.has(group.id);
             const groupMarked = group.files.filter(f => marked.has(f.path)).length;
@@ -161,7 +164,7 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
             return (
               <div key={group.id} style={{
                 background:'var(--bg-surface)', border:'1px solid var(--border)',
-                borderRadius:'var(--radius-md)', marginBottom: 8, overflow:'hidden',
+                borderRadius:'var(--radius-md)', marginBottom: scale(8), overflow:'hidden',
               }}>
                 {/* Group header */}
                 <div
@@ -171,30 +174,30 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
                     return next;
                   })}
                   style={{
-                    padding:'9px 14px', display:'flex', alignItems:'center', gap:10,
+                    padding:`${scale(9)}px ${scale(14)}px`, display:'flex', alignItems:'center', gap: scale(10),
                     cursor:'pointer', background:'var(--bg-elevated)',
                   }}
                   onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-hover)'}
                   onMouseLeave={e => e.currentTarget.style.background = 'var(--bg-elevated)'}
                 >
-                  <span style={{ fontSize:15 }}>{fileIcon(group.files[0].ext)}</span>
-                  <span style={{ fontFamily:'var(--font-mono)', fontSize:10, color:'var(--text-muted)' }}>
+                  <span style={{ fontSize: scale(15) }}>{fileIcon(group.files[0].ext)}</span>
+                  <span style={{ fontFamily:'var(--font-mono)', fontSize: scale(10), color:'var(--text-muted)' }}>
                     {group.hash.substring(0,8)}
                   </span>
-                  <span style={{ fontSize:12, color:'var(--text-secondary)' }}>
+                  <span style={{ fontSize: scale(12), color:'var(--text-secondary)' }}>
                     {group.files.length} identical files · {formatSize(group.files[0].size)} each
                   </span>
                   {group.hasProtected && (
-                    <span style={{ fontSize:10, color:'var(--teal)', background:'var(--teal-dim)', border:'1px solid var(--teal)', borderRadius:4, padding:'1px 6px' }}>
+                    <span style={{ fontSize: scale(10), color:'var(--teal)', background:'var(--teal-dim)', border:'1px solid var(--teal)', borderRadius:4, padding:`${scale(1)}px ${scale(6)}px` }}>
                       🛡 has protected copy
                     </span>
                   )}
                   {groupMarked > 0 && (
-                    <span style={{ fontSize:10, color:'var(--red)', background:'var(--red-dim)', border:'1px solid var(--red)', borderRadius:4, padding:'1px 6px', marginLeft:'auto', marginRight:6 }}>
+                    <span style={{ fontSize: scale(10), color:'var(--red)', background:'var(--red-dim)', border:'1px solid var(--red)', borderRadius:4, padding:`${scale(1)}px ${scale(6)}px`, marginLeft:'auto', marginRight: scale(6) }}>
                       {groupMarked} marked
                     </span>
                   )}
-                  <span style={{ color:'var(--text-muted)', fontSize:12, marginLeft: groupMarked > 0 ? 0 : 'auto' }}>
+                  <span style={{ color:'var(--text-muted)', fontSize: scale(12), marginLeft: groupMarked > 0 ? 0 : 'auto' }}>
                     {isExpanded ? '▾' : '▸'}
                   </span>
                 </div>
@@ -209,7 +212,7 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
                       key={file.path}
                       onClick={() => toggleFile(file.path, isProtected)}
                       style={{
-                        padding:'8px 14px', display:'flex', alignItems:'center', gap:12,
+                        padding:`${scale(8)}px ${scale(14)}px`, display:'flex', alignItems:'center', gap: scale(12),
                         borderTop:'1px solid var(--border)',
                         cursor: isProtected ? 'default' : 'pointer',
                         background: isProtected
@@ -223,45 +226,45 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
                       {/* Checkbox / shield */}
                       {isProtected ? (
                         <div style={{
-                          width:16, height:16, display:'flex', alignItems:'center',
-                          justifyContent:'center', fontSize:13, flexShrink:0,
+                          width: scale(16), height: scale(16), display:'flex', alignItems:'center',
+                          justifyContent:'center', fontSize: scale(13), flexShrink:0,
                         }}>🛡</div>
                       ) : (
                         <div style={{
-                          width:16, height:16, borderRadius:4, flexShrink:0,
+                          width: scale(16), height: scale(16), borderRadius:4, flexShrink:0,
                           border:`1.5px solid ${isMarked ? 'var(--red)' : 'var(--border-light)'}`,
                           background: isMarked ? 'var(--red)' : 'transparent',
                           display:'flex', alignItems:'center', justifyContent:'center',
                         }}>
-                          {isMarked && <span style={{ color:'#fff', fontSize:10, lineHeight:1 }}>✓</span>}
+                          {isMarked && <span style={{ color:'#fff', fontSize: scale(10), lineHeight:1 }}>✓</span>}
                         </div>
                       )}
 
                       <div style={{ flex:1, minWidth:0 }}>
                         <div style={{
-                          fontSize:12, fontWeight:500,
+                          fontSize: scale(12), fontWeight:500,
                           color: isProtected ? 'var(--teal)' : isMarked ? 'var(--red)' : 'var(--text-primary)',
                           whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis',
                         }}>{file.name}</div>
                         <div style={{
-                          fontSize:10, color:'var(--text-muted)',
+                          fontSize: scale(10), color:'var(--text-muted)',
                           fontFamily:'var(--font-mono)',
                           whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis',
                         }}>{file.path}</div>
                       </div>
 
                       <div style={{ textAlign:'right', flexShrink:0 }}>
-                        <div style={{ fontSize:11, color:'var(--text-secondary)' }}>{formatSize(file.size)}</div>
-                        <div style={{ fontSize:10, color:'var(--text-muted)' }}>{formatDate(file.modified)}</div>
+                        <div style={{ fontSize: scale(11), color:'var(--text-secondary)' }}>{formatSize(file.size)}</div>
+                        <div style={{ fontSize: scale(10), color:'var(--text-muted)' }}>{formatDate(file.modified)}</div>
                       </div>
 
                       {isProtected && (
-                        <div style={{ background:'var(--teal-dim)', color:'var(--teal)', border:'1px solid var(--teal)', borderRadius:4, padding:'1px 7px', fontSize:9, fontWeight:600, flexShrink:0 }}>
+                        <div style={{ background:'var(--teal-dim)', color:'var(--teal)', border:'1px solid var(--teal)', borderRadius:4, padding:`${scale(1)}px ${scale(7)}px`, fontSize: scale(9), fontWeight:600, flexShrink:0 }}>
                           PROTECTED
                         </div>
                       )}
                       {!isProtected && file.sourceLabel === 'target' && mode === 'compare' && (
-                        <div style={{ background:'var(--red-dim)', color:'var(--red)', border:'1px solid var(--red)', borderRadius:4, padding:'1px 7px', fontSize:9, fontWeight:600, flexShrink:0 }}>
+                        <div style={{ background:'var(--red-dim)', color:'var(--red)', border:'1px solid var(--red)', borderRadius:4, padding:`${scale(1)}px ${scale(7)}px`, fontSize: scale(9), fontWeight:600, flexShrink:0 }}>
                           TARGET
                         </div>
                       )}
@@ -276,20 +279,20 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
           {warnings.length > 0 && (
             <div style={{
               background: 'var(--bg-surface)', border: '1px solid var(--amber)',
-              borderRadius: 'var(--radius-md)', marginTop: 10, overflow: 'hidden',
+              borderRadius: 'var(--radius-md)', marginTop: scale(10), overflow: 'hidden',
             }}>
               <div
                 onClick={() => setWarningsOpen(v => !v)}
                 style={{
-                  padding: '9px 14px', display: 'flex', alignItems: 'center', gap: 8,
+                  padding: `${scale(9)}px ${scale(14)}px`, display: 'flex', alignItems: 'center', gap: scale(8),
                   cursor: 'pointer', background: 'var(--amber-dim)',
                 }}
               >
-                <span style={{ fontSize: 13 }}>⚠</span>
-                <span style={{ fontSize: 12, color: 'var(--amber)', fontWeight: 600 }}>
+                <span style={{ fontSize: scale(13) }}>⚠</span>
+                <span style={{ fontSize: scale(12), color: 'var(--amber)', fontWeight: 600 }}>
                   {warnings.length} file{warnings.length !== 1 ? 's' : ''} skipped — click to see why
                 </span>
-                <span style={{ color: 'var(--text-muted)', fontSize: 12, marginLeft: 'auto' }}>
+                <span style={{ color: 'var(--text-muted)', fontSize: scale(12), marginLeft: 'auto' }}>
                   {warningsOpen ? '▾' : '▸'}
                 </span>
               </div>
@@ -297,14 +300,14 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
                 <div style={{ maxHeight: 200, overflowY: 'auto' }}>
                   {warnings.map((w, i) => (
                     <div key={i} style={{
-                      padding: '7px 14px', borderTop: '1px solid var(--border)',
-                      display: 'flex', justifyContent: 'space-between', gap: 12,
+                      padding: `${scale(7)}px ${scale(14)}px`, borderTop: '1px solid var(--border)',
+                      display: 'flex', justifyContent: 'space-between', gap: scale(12),
                     }}>
                       <span style={{
-                        fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-secondary)',
+                        fontFamily: 'var(--font-mono)', fontSize: scale(10), color: 'var(--text-secondary)',
                         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1,
                       }}>{w.path}</span>
-                      <span style={{ fontSize: 10, color: 'var(--amber)', flexShrink: 0 }}>{w.reason}</span>
+                      <span style={{ fontSize: scale(10), color: 'var(--amber)', flexShrink: 0 }}>{w.reason}</span>
                     </div>
                   ))}
                 </div>
@@ -316,36 +319,36 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
         {/* ── Action panel ── */}
         <div style={{
           width:210, flexShrink:0, background:'var(--bg-surface)',
-          borderLeft:'1px solid var(--border)', padding:18,
-          display:'flex', flexDirection:'column', gap:16,
+          borderLeft:'1px solid var(--border)', padding: scale(18),
+          display:'flex', flexDirection:'column', gap: scale(16),
         }}>
           <div>
             <p style={labelStyle}>Selected for deletion</p>
-            <div style={{ fontSize:26, fontWeight:700, color: markedCount > 0 ? 'var(--red)' : 'var(--text-muted)', fontFamily:'var(--font-mono)' }}>
+            <div style={{ fontSize: scale(26), fontWeight:700, color: markedCount > 0 ? 'var(--red)' : 'var(--text-muted)', fontFamily:'var(--font-mono)' }}>
               {markedCount}
             </div>
-            <div style={{ fontSize:11, color:'var(--text-muted)' }}>{formatSize(markedBytes)} will be freed</div>
+            <div style={{ fontSize: scale(11), color:'var(--text-muted)' }}>{formatSize(markedBytes)} will be freed</div>
           </div>
 
           <div style={{ height:1, background:'var(--border)'}}/>
 
-          <div style={{ display:'flex', flexDirection:'column', gap:7 }}>
+          <div style={{ display:'flex', flexDirection:'column', gap: scale(7) }}>
             <button onClick={autoMarkAll} style={{ ...btnSecondary, textAlign:'left', width:'100%' }}>⚡ Auto-mark</button>
             <button onClick={deselectAll}  style={{ ...btnSecondary, textAlign:'left', width:'100%' }}>☐ Deselect all</button>
           </div>
 
           {mode === 'compare' && (
-            <div style={{ background:'var(--teal-dim)', border:'1px solid var(--teal)', borderRadius:'var(--radius-sm)', padding:'10px 12px' }}>
-              <p style={{ fontSize:11, color:'var(--teal)', fontWeight:600, marginBottom:4 }}>🛡 Protected source</p>
-              <p style={{ fontSize:10, color:'var(--text-secondary)', lineHeight:1.5 }}>
+            <div style={{ background:'var(--teal-dim)', border:'1px solid var(--teal)', borderRadius:'var(--radius-sm)', padding: `${scale(10)}px ${scale(12)}px` }}>
+              <p style={{ fontSize: scale(11), color:'var(--teal)', fontWeight:600, marginBottom: scale(4) }}>🛡 Protected source</p>
+              <p style={{ fontSize: scale(10), color:'var(--text-secondary)', lineHeight:1.5 }}>
                 Files in your protected source are shielded and can never be selected for deletion.
               </p>
             </div>
           )}
 
-          <div style={{ background:'var(--amber-dim)', border:'1px solid var(--amber)', borderRadius:'var(--radius-sm)', padding:'10px 12px' }}>
-            <p style={{ fontSize:11, color:'var(--amber)', fontWeight:600, marginBottom:4 }}>⚠ Safe deletion</p>
-            <p style={{ fontSize:10, color:'var(--text-secondary)', lineHeight:1.5 }}>
+          <div style={{ background:'var(--amber-dim)', border:'1px solid var(--amber)', borderRadius:'var(--radius-sm)', padding: `${scale(10)}px ${scale(12)}px` }}>
+            <p style={{ fontSize: scale(11), color:'var(--amber)', fontWeight:600, marginBottom: scale(4) }}>⚠ Safe deletion</p>
+            <p style={{ fontSize: scale(10), color:'var(--text-secondary)', lineHeight:1.5 }}>
               Files go to the Recycle Bin — recoverable if needed.
             </p>
           </div>
@@ -373,13 +376,13 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
         }}>
           <div style={{
             background:'var(--bg-elevated)', border:'1px solid var(--border)',
-            borderRadius:'var(--radius-lg)', padding:26, width:360,
+            borderRadius:'var(--radius-lg)', padding: scale(26), width:360,
           }}>
-            <h3 style={{ fontSize:16, fontWeight:600, marginBottom:8 }}>Confirm deletion</h3>
-            <p style={{ fontSize:13, color:'var(--text-secondary)', marginBottom:20 }}>
+            <h3 style={{ fontSize: scale(16), fontWeight:600, marginBottom: scale(8) }}>Confirm deletion</h3>
+            <p style={{ fontSize: scale(13), color:'var(--text-secondary)', marginBottom: scale(20) }}>
               {markedCount} file{markedCount !== 1 ? 's' : ''} ({formatSize(markedBytes)}) will be moved to the Recycle Bin.
             </p>
-            <div style={{ display:'flex', gap:10, justifyContent:'flex-end' }}>
+            <div style={{ display:'flex', gap: scale(10), justifyContent:'flex-end' }}>
               <button onClick={() => setConfirmOpen(false)} style={btnSecondary}>Cancel</button>
               <button onClick={handleDelete} style={btnDanger}>Delete marked</button>
             </div>
@@ -390,8 +393,12 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
   );
 }
 
-const labelStyle = { fontSize:10, fontWeight:600, color:'var(--text-muted)', letterSpacing:'0.08em', textTransform:'uppercase', marginBottom:6 };
-const btnPrimary   = { background:'var(--teal)', color:'#0d0f14', border:'none', borderRadius:'var(--radius-sm)', padding:'8px 18px', fontSize:12, fontWeight:600, cursor:'pointer' };
-const btnSecondary = { background:'var(--bg-elevated)', color:'var(--text-secondary)', border:'1px solid var(--border)', borderRadius:'var(--radius-sm)', padding:'7px 12px', fontSize:11, cursor:'pointer' };
-const btnDanger    = { background:'var(--red)', color:'#fff', border:'none', borderRadius:'var(--radius-sm)', padding:'10px 16px', fontSize:12, fontWeight:600, cursor:'pointer', width:'100%' };
-const btnGhost     = { background:'transparent', border:'none', borderRadius:'var(--radius-sm)', cursor:'pointer', color:'var(--text-muted)' };
+function makeStyles(scale) {
+  return {
+    labelStyle: { fontSize: scale(10), fontWeight: 600, color: 'var(--text-muted)', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: scale(6) },
+    btnPrimary:   { background: 'var(--teal)', color: '#0d0f14', border: 'none', borderRadius: 'var(--radius-sm)', padding: `${scale(8)}px ${scale(18)}px`, fontSize: scale(12), fontWeight: 600, cursor: 'pointer' },
+    btnSecondary: { background: 'var(--bg-elevated)', color: 'var(--text-secondary)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: `${scale(7)}px ${scale(12)}px`, fontSize: scale(11), cursor: 'pointer' },
+    btnDanger:    { background: 'var(--red)', color: '#fff', border: 'none', borderRadius: 'var(--radius-sm)', padding: `${scale(10)}px ${scale(16)}px`, fontSize: scale(12), fontWeight: 600, cursor: 'pointer', width: '100%' },
+    btnGhost:     { background: 'transparent', border: 'none', borderRadius: 'var(--radius-sm)', cursor: 'pointer', color: 'var(--text-muted)' },
+  };
+}

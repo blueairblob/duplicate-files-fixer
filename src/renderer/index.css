@@ -22,9 +22,16 @@
   --text-secondary: #8890a8;
   --text-muted:     #4e5568;
 
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
+  /* Base radius values, authored at the 1.0 / 13px baseline. --dpr-scale is set
+     at runtime by useDPR() (defaults to 1 until the hook mounts, so there's no
+     flash of incorrectly-sized chrome on first paint). Components that need a
+     radius in an inline style should use scale() from useDPR() directly so JS
+     and CSS stay in lockstep; these vars cover plain-CSS usages. */
+  --dpr-scale: 1;
+  --dpr-base-font: 13px;
+  --radius-sm: calc(6px * var(--dpr-scale));
+  --radius-md: calc(10px * var(--dpr-scale));
+  --radius-lg: calc(14px * var(--dpr-scale));
 
   --font-sans: 'Inter', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', monospace;
@@ -42,7 +49,7 @@ body {
   font-family: var(--font-sans);
   background: var(--bg-base);
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: var(--dpr-base-font);
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   user-select: none;
