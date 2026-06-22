@@ -71,10 +71,10 @@ app.on('window-all-closed', () => {
 });
 
 // ── IPC: Pick folder ──────────────────────────────────────────────────────────
-ipcMain.handle('dialog:openFolder', async () => {
-  const result = await dialog.showOpenDialog({
-    properties: ['openDirectory', 'multiSelections'],
-  });
+ipcMain.handle('dialog:openFolder', async (_event, defaultPath) => {
+  const opts = { properties: ['openDirectory', 'multiSelections'] };
+  if (defaultPath) opts.defaultPath = defaultPath;
+  const result = await dialog.showOpenDialog(opts);
   return result.canceled ? [] : result.filePaths;
 });
 

@@ -28,12 +28,16 @@ const AUTO_MARK_RULES = [
   { id: 'keep-largest',   label: 'Keep largest',          desc: 'Keep the highest-size copy (useful for media)' },
 ];
 
-// ── Folder zone — single "Browse" button opens the three-panel modal ─────────
+// ── Folder zone ───────────────────────────────────────────────────────────────
+// "Browse" opens the native OS folder picker directly (Windows Explorer on
+// Windows, Finder on macOS, GTK portal on Linux). The "locations" link opens
+// a compact quick-jump panel so users can seed the picker to a specific drive
+// or common folder without hunting for it manually.
 function FolderZone({ label, sublabel, accent, folders, onAddPath, onRemove }) {
   const { scale } = useDPR();
   const { btnSm, btnGhost } = makeStyles(scale);
-  const [modalOpen, setModalOpen] = useState(false);
-  const [dragging, setDragging] = useState(false);
+  const [locationsOpen, setLocationsOpen] = useState(false);
+  const [dragging, setDragging]           = useState(false);
 
   const handleDrop = (e) => {
     e.preventDefault();
@@ -44,9 +48,17 @@ function FolderZone({ label, sublabel, accent, folders, onAddPath, onRemove }) {
     if (dropped.length) dropped.forEach(p => onAddPath(p));
   };
 
-  const handleConfirm = (selectedPath) => {
+  // Open the native picker, optionally pre-seeded to a path from the locations panel
+  const openPicker = async (seedPath) => {
+    if (!api) return;
+    const paths = await api.openFolder(seedPath || undefined);
+    if (paths && paths.length > 0) paths.forEach(p => onAddPath(p));
+  };
+
+  // Called by the LocationsPanel when the user picks a quick-jump location
+  const handleLocationConfirm = (selectedPath) => {
     onAddPath(selectedPath);
-    setModalOpen(false);
+    setLocationsOpen(false);
   };
 
   return (
@@ -71,7 +83,10 @@ function FolderZone({ label, sublabel, accent, folders, onAddPath, onRemove }) {
         {folders.length === 0 ? (
           <div style={{ textAlign:'center' }}>
             <p style={{ fontSize: scale(12), color:'var(--text-muted)', marginBottom: scale(10) }}>Drop folder here, or</p>
-            <button onClick={() => setModalOpen(true)} style={{ ...btnSm, borderColor:accent, color:accent }}>📂 Browse</button>
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap: scale(8) }}>
+              <button onClick={() => openPicker(null)} style={{ ...btnSm, borderColor:accent, color:accent }}>📂 Browse…</button>
+              <button onClick={() => setLocationsOpen(true)} style={{ ...btnGhost, fontSize: scale(11), color:'var(--text-muted)' }}>Locations ›</button>
+            </div>
           </div>
         ) : (
           <div style={{ display:'flex', flexDirection:'column', gap: scale(5) }}>
@@ -86,17 +101,20 @@ function FolderZone({ label, sublabel, accent, folders, onAddPath, onRemove }) {
                 <button onClick={() => onRemove(f)} style={{ ...btnGhost, fontSize: scale(10), color:'var(--red)', flexShrink:0 }}>✕</button>
               </div>
             ))}
-            <button onClick={() => setModalOpen(true)} style={{ ...btnGhost, fontSize: scale(11), color:accent, marginTop: scale(4), alignSelf:'flex-start' }}>+ Browse</button>
+            <div style={{ display:'flex', alignItems:'center', gap: scale(8), marginTop: scale(4) }}>
+              <button onClick={() => openPicker(null)} style={{ ...btnGhost, fontSize: scale(11), color:accent }}>+ Browse…</button>
+              <button onClick={() => setLocationsOpen(true)} style={{ ...btnGhost, fontSize: scale(11), color:'var(--text-muted)' }}>Locations ›</button>
+            </div>
           </div>
         )}
       </div>
 
-      {modalOpen && (
+      {locationsOpen && (
         <FolderBrowserModal
           title={`Add to ${label}`}
           accent={accent}
-          onConfirm={handleConfirm}
-          onClose={() => setModalOpen(false)}
+          onConfirm={handleLocationConfirm}
+          onClose={() => setLocationsOpen(false)}
         />
       )}
     </div>

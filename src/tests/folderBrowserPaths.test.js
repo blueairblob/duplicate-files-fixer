@@ -1,7 +1,10 @@
 import { describe, it, expect } from 'vitest';
 
-// Pure re-implementation of the breadcrumb logic from FolderBrowserModal.jsx,
-// extracted here for fast, dependency-free testing.
+// Path utility helpers — breadcrumb splitting and parent resolution.
+// These were originally used by FolderBrowserModal's custom folder tree (Sprint 2).
+// The modal now delegates all browsing to the native OS dialog, but these
+// utilities are retained and tested here because main.js uses similar path
+// logic for getLocations and may be called on in future features.
 
 function pathToBreadcrumbs(p) {
   if (!p) return [];
