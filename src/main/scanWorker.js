@@ -171,7 +171,10 @@ async function run() {
   const allFiles = [];
 
   // Send an immediate heartbeat so the UI knows the worker started.
-  parentPort.postMessage({ type: 'progress', phase: 'walking', scanned: 0, currentPath: '' });
+  // Seed with the first folder path so the live ticker shows immediately
+  // rather than waiting for the first batch of files to accumulate.
+  const firstFolder = targetFolders[0] || protectedFolders[0] || '';
+  parentPort.postMessage({ type: 'progress', phase: 'walking', scanned: 0, currentPath: firstFolder });
 
   // ── Pass 1: walk all folders, collect file metadata (cheap) ──────────────
   if (mode === 'compare') {
@@ -209,7 +212,7 @@ async function run() {
   }
 
   const candidateCount = sizeGroups.reduce((acc, g) => acc + g.length, 0);
-  parentPort.postMessage({ type: 'progress', phase: 'hashing', scanned: 0, total: candidateCount, currentPath: '' });
+  parentPort.postMessage({ type: 'progress', phase: 'hashing', scanned: 0, total: candidateCount, currentPath: firstFolder });
 
   // boundary hash → file[]
   const byBoundaryHash = new Map();
@@ -252,7 +255,7 @@ async function run() {
 
   parentPort.postMessage({
     type: 'progress', phase: 'verifying',
-    scanned: 0, total: fullHashTotal, currentPath: '',
+    scanned: 0, total: fullHashTotal, currentPath: firstFolder,
   });
 
   const fileMap = new Map(); // fullHash → file[]
