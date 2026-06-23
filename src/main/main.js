@@ -363,7 +363,7 @@ ipcMain.handle('scan:start', async (event, opts) => {
 
     worker.on('message', (msg) => {
       if (msg.type === 'progress') {
-        win?.webContents.send('scan:progress', { scanned: msg.scanned, phase: msg.phase, total: msg.total });
+        win?.webContents.send('scan:progress', { scanned: msg.scanned, phase: msg.phase, total: msg.total, currentPath: msg.currentPath ?? '' });
       } else if (msg.type === 'done') {
         activeWorker = null;
         resolve(msg.result);
