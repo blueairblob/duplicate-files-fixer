@@ -3,12 +3,13 @@ import TitleBar from './components/TitleBar.jsx';
 import HomeView from './views/HomeView.jsx';
 import ScanView from './views/ScanView.jsx';
 import ResultsView from './views/ResultsView.jsx';
+import VerifyResultsView from './views/VerifyResultsView.jsx';
 import DoneView from './views/DoneView.jsx';
 
-// App-level state machine: home → scanning → results → done
+// App-level state machine: home → scanning → results/verify → done
 export default function App() {
   const [view, setView] = useState('home');
-  const [scanConfig, setScanConfig] = useState(null); // { mode, protectedFolders, targetFolders, filters }
+  const [scanConfig, setScanConfig] = useState(null);
   const [scanResult, setScanResult] = useState(null);
   const [deleteResult, setDeleteResult] = useState(null);
 
@@ -19,7 +20,8 @@ export default function App() {
 
   const handleScanComplete = useCallback((result) => {
     setScanResult(result);
-    setView('results');
+    // Verify mode has its own read-only results view
+    setView(result.mode === 'verify' ? 'verify' : 'results');
   }, []);
 
   const handleDeleteComplete = useCallback((result) => {
@@ -53,6 +55,13 @@ export default function App() {
             scanResult={scanResult}
             scanConfig={scanConfig}
             onDeleteComplete={handleDeleteComplete}
+            onBack={handleReset}
+          />
+        )}
+        {view === 'verify' && (
+          <VerifyResultsView
+            scanResult={scanResult}
+            scanConfig={scanConfig}
             onBack={handleReset}
           />
         )}

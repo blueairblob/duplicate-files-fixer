@@ -18,6 +18,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setExclusions:    (list)   => ipcRenderer.invoke('exclusions:set', list),
   resetExclusions:  ()       => ipcRenderer.invoke('exclusions:resetDefaults'),
 
+  saveTextFile:     (defaultName, content) => ipcRenderer.invoke('dialog:saveTextFile', defaultName, content),
+
   windowMinimize:   ()       => ipcRenderer.send('window:minimize'),
   windowMaximize:   ()       => ipcRenderer.send('window:maximize'),
   windowClose:      ()       => ipcRenderer.send('window:close'),

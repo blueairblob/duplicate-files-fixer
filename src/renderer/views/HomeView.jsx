@@ -140,16 +140,16 @@ export default function HomeView({ onStartScan }) {
   const toggleType = (id) =>
     setTypes(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
 
-  const canScan = mode === 'compare'
-    ? protectedFolders.length > 0 && targetFolders.length > 0
-    : simpleFolders.length > 0;
+  const canScan = mode === 'simple'
+    ? simpleFolders.length > 0
+    : protectedFolders.length > 0 && targetFolders.length > 0;
 
   const handleStart = () => {
     if (!canScan) return;
     onStartScan({
       mode,
-      protectedFolders: mode === 'compare' ? protectedFolders : [],
-      targetFolders:    mode === 'compare' ? targetFolders : simpleFolders,
+      protectedFolders: mode === 'simple' ? [] : protectedFolders,
+      targetFolders:    mode === 'simple' ? simpleFolders : targetFolders,
       filters: { types, minSize },
       autoMarkRule,
       includeEmpty,
@@ -208,6 +208,7 @@ export default function HomeView({ onStartScan }) {
             {[
               { id:'compare', icon:'⚖', title:'Compare locations', desc:'Protected source vs. target — recommended' },
               { id:'simple',  icon:'🔍', title:'Simple scan',       desc:'Find all dupes within a folder set' },
+              { id:'verify',  icon:'✅', title:'Verify backup',     desc:'Check every NAS file is present on desktop' },
             ].map(({ id, icon, title, desc }) => (
               <button key={id} onClick={() => setMode(id)} style={{
                 flex:1, padding:`${scale(12)}px ${scale(14)}px`, textAlign:'left',
@@ -225,32 +226,7 @@ export default function HomeView({ onStartScan }) {
         </div>
 
         {/* Folder zones */}
-        {mode === 'compare' ? (
-          <div>
-            <Label>Folder locations</Label>
-            <div style={{
-              display:'flex', gap: scale(12), padding: scale(14),
-              background:'var(--bg-elevated)', border:'1px solid var(--border)',
-              borderRadius:'var(--radius-md)',
-            }}>
-              <FolderZone
-                label="Protected source" sublabel="— never deleted" accent="var(--teal)"
-                folders={protectedFolders}
-                onAddPath={p => addPathToZone(setProtectedFolders, p)}
-                onRemove={f => setProtectedFolders(prev => prev.filter(x => x !== f))}
-              />
-              <div style={{ width:1, background:'var(--border)', display:'flex', alignItems:'center', justifyContent:'center', position:'relative' }}>
-                <div style={{ position:'absolute', background:'var(--bg-elevated)', padding:`${scale(4)}px ${scale(6)}px`, fontSize: scale(10), color:'var(--text-muted)', border:'1px solid var(--border)', borderRadius: 4 }}>vs</div>
-              </div>
-              <FolderZone
-                label="Scan target" sublabel="— dupes marked for deletion" accent="var(--red)"
-                folders={targetFolders}
-                onAddPath={p => addPathToZone(setTargetFolders, p)}
-                onRemove={f => setTargetFolders(prev => prev.filter(x => x !== f))}
-              />
-            </div>
-          </div>
-        ) : (
+        {mode === 'simple' ? (
           <div>
             <Label>Folders to scan</Label>
             <FolderZone
@@ -260,9 +236,45 @@ export default function HomeView({ onStartScan }) {
               onRemove={f => setSimpleFolders(prev => prev.filter(x => x !== f))}
             />
           </div>
+        ) : (
+          <div>
+            <Label>Folder locations</Label>
+            <div style={{
+              display:'flex', gap: scale(12), padding: scale(14),
+              background:'var(--bg-elevated)', border:'1px solid var(--border)',
+              borderRadius:'var(--radius-md)',
+            }}>
+              <FolderZone
+                label={mode === 'verify' ? 'NAS / source'   : 'Protected source'}
+                sublabel={mode === 'verify' ? '— the original' : '— never deleted'}
+                accent="var(--teal)"
+                folders={protectedFolders}
+                onAddPath={p => addPathToZone(setProtectedFolders, p)}
+                onRemove={f => setProtectedFolders(prev => prev.filter(x => x !== f))}
+              />
+              <div style={{ width:1, background:'var(--border)', display:'flex', alignItems:'center', justifyContent:'center', position:'relative' }}>
+                <div style={{ position:'absolute', background:'var(--bg-elevated)', padding:`${scale(4)}px ${scale(6)}px`, fontSize: scale(10), color:'var(--text-muted)', border:'1px solid var(--border)', borderRadius: 4 }}>
+                  {mode === 'verify' ? '→' : 'vs'}
+                </div>
+              </div>
+              <FolderZone
+                label={mode === 'verify' ? 'Desktop / backup' : 'Scan target'}
+                sublabel={mode === 'verify' ? '— check completeness' : '— dupes marked for deletion'}
+                accent={mode === 'verify' ? 'var(--teal)' : 'var(--red)'}
+                folders={targetFolders}
+                onAddPath={p => addPathToZone(setTargetFolders, p)}
+                onRemove={f => setTargetFolders(prev => prev.filter(x => x !== f))}
+              />
+            </div>
+            {mode === 'verify' && (
+              <p style={{ fontSize: scale(10), color:'var(--text-muted)', marginTop: scale(8) }}>
+                ℹ Every file on the NAS will be checked against the desktop backup by content — renames and reorganised folders are handled correctly.
+              </p>
+            )}
+          </div>
         )}
 
-        {/* Auto-mark rule */}
+        {/* Auto-mark rule — not shown for verify mode */}
         {mode === 'compare' && (
           <div>
             <Label>Auto-mark rule</Label>
@@ -351,7 +363,7 @@ export default function HomeView({ onStartScan }) {
           </button>
           {!canScan && (
             <p style={{ marginTop: scale(8), fontSize: scale(11), color:'var(--text-muted)' }}>
-              {mode === 'compare' ? 'Add at least one protected source and one target.' : 'Add at least one folder.'}
+              {mode === 'simple' ? 'Add at least one folder.' : 'Add a NAS source and a desktop backup folder.'}
             </p>
           )}
         </div>

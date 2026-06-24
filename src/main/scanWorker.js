@@ -177,7 +177,7 @@ async function run() {
   parentPort.postMessage({ type: 'progress', phase: 'walking', scanned: 0, currentPath: firstFolder });
 
   // ── Pass 1: walk all folders, collect file metadata (cheap) ──────────────
-  if (mode === 'compare') {
+  if (mode === 'compare' || mode === 'verify') {
     for (const folder of (protectedFolders || [])) {
       if (cancelled) break;
       walkCollect(folder, filters || {}, exclusions || [], 'protected', allFiles, warnings, counter);
@@ -280,32 +280,104 @@ async function run() {
     }
   }
 
-  // ── Build duplicate groups ────────────────────────────────────────────────
+  // ── Build duplicate groups (compare / simple modes) ──────────────────────
   const groups = [];
   let groupId = 0;
-  for (const [hash, files] of fileMap.entries()) {
-    if (files.length < 2) continue;
 
-    const hasProtected = files.some(f => f.sourceLabel === 'protected');
-    const hasTarget    = files.some(f => f.sourceLabel === 'target');
-    if (mode === 'compare' && !hasTarget) continue;
+  if (mode !== 'verify') {
+    for (const [hash, files] of fileMap.entries()) {
+      if (files.length < 2) continue;
 
-    const markedPaths = new Set();
-    if (mode === 'compare' && hasProtected) {
-      files.filter(f => f.sourceLabel === 'target').forEach(f => markedPaths.add(f.path));
-    } else {
-      let sorted;
-      if (autoMarkRule === 'keep-oldest') {
-        sorted = [...files].sort((a, b) => new Date(a.modified) - new Date(b.modified));
-      } else if (autoMarkRule === 'keep-largest') {
-        sorted = [...files].sort((a, b) => b.size - a.size);
+      const hasProtected = files.some(f => f.sourceLabel === 'protected');
+      const hasTarget    = files.some(f => f.sourceLabel === 'target');
+      if (mode === 'compare' && !hasTarget) continue;
+
+      const markedPaths = new Set();
+      if (mode === 'compare' && hasProtected) {
+        files.filter(f => f.sourceLabel === 'target').forEach(f => markedPaths.add(f.path));
       } else {
-        sorted = [...files].sort((a, b) => new Date(b.modified) - new Date(a.modified));
+        let sorted;
+        if (autoMarkRule === 'keep-oldest') {
+          sorted = [...files].sort((a, b) => new Date(a.modified) - new Date(b.modified));
+        } else if (autoMarkRule === 'keep-largest') {
+          sorted = [...files].sort((a, b) => b.size - a.size);
+        } else {
+          sorted = [...files].sort((a, b) => new Date(b.modified) - new Date(a.modified));
+        }
+        sorted.slice(1).forEach(f => markedPaths.add(f.path));
       }
-      sorted.slice(1).forEach(f => markedPaths.add(f.path));
+
+      groups.push({ id: groupId++, hash, files, autoMarked: Array.from(markedPaths), hasProtected });
+    }
+  }
+
+  // ── Build verify report ───────────────────────────────────────────────────
+  // Three buckets: matched (in both), nasOnly (protected only — backup gap),
+  // desktopOnly (target only — safe but not in NAS).
+  let verifyReport = null;
+  if (mode === 'verify') {
+    // Also include files that never reached the hash stage (size-singletons) —
+    // they are by definition unique to one side.
+    const hashedHashes = new Set(fileMap.keys());
+
+    // Build a map of hash → sourceLabels for hashed files
+    const matched    = []; // files in both
+    const nasOnly    = []; // protected only — missing from desktop
+    const desktopOnly = []; // target only — extra on desktop
+
+    for (const [hash, files] of fileMap.entries()) {
+      const hasProtected = files.some(f => f.sourceLabel === 'protected');
+      const hasTarget    = files.some(f => f.sourceLabel === 'target');
+      if (hasProtected && hasTarget) {
+        // At least one copy in each — record one representative per side
+        matched.push({
+          hash,
+          nasFile:     files.find(f => f.sourceLabel === 'protected'),
+          desktopFile: files.find(f => f.sourceLabel === 'target'),
+          allFiles: files,
+        });
+      } else if (hasProtected && !hasTarget) {
+        files.filter(f => f.sourceLabel === 'protected').forEach(f => nasOnly.push(f));
+      } else if (!hasProtected && hasTarget) {
+        files.filter(f => f.sourceLabel === 'target').forEach(f => desktopOnly.push(f));
+      }
     }
 
-    groups.push({ id: groupId++, hash, files, autoMarked: Array.from(markedPaths), hasProtected });
+    // Size-singleton files never entered fileMap — add them to the right bucket
+    for (const f of nonEmptyFiles) {
+      // If this file's hash was never computed (it was a size-singleton,
+      // so it never entered Pass 2), it is unique to its source.
+      // We detect this by checking if the file appears in fileMap at all.
+      // Since fileMap is keyed by full hash and we only added files that
+      // went through Pass 3, check if the file path appears anywhere.
+      const inFileMap = [...fileMap.values()].some(files => files.some(mf => mf.path === f.path));
+      if (!inFileMap) {
+        if (f.sourceLabel === 'protected') nasOnly.push(f);
+        else desktopOnly.push(f);
+      }
+    }
+
+    // Sort nasOnly by path for easy reading
+    nasOnly.sort((a, b) => a.path.localeCompare(b.path));
+    desktopOnly.sort((a, b) => a.path.localeCompare(b.path));
+
+    const sum = arr => arr.reduce((acc, f) => acc + (f.size || f.nasFile?.size || 0), 0);
+
+    verifyReport = {
+      matched,
+      nasOnly,
+      desktopOnly,
+      summary: {
+        matchedCount:     matched.length,
+        nasOnlyCount:     nasOnly.length,
+        desktopOnlyCount: desktopOnly.length,
+        matchedSize:      sum(matched.map(m => m.nasFile)),
+        nasOnlySize:      sum(nasOnly),
+        desktopOnlySize:  sum(desktopOnly),
+        totalNas:         allFiles.filter(f => f.sourceLabel === 'protected').length,
+        totalDesktop:     allFiles.filter(f => f.sourceLabel === 'target').length,
+      },
+    };
   }
 
   // ── Empty file groups ─────────────────────────────────────────────────────
@@ -322,6 +394,7 @@ async function run() {
       totalHashed: counter.hashed,
       warnings,
       mode,
+      verifyReport,
     },
   });
 }

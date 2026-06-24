@@ -78,6 +78,16 @@ ipcMain.handle('dialog:openFolder', async (_event, defaultPath) => {
   return result.canceled ? [] : result.filePaths;
 });
 
+ipcMain.handle('dialog:saveTextFile', async (_event, defaultName, content) => {
+  const result = await dialog.showSaveDialog({
+    defaultPath: defaultName || 'report.txt',
+    filters: [{ name: 'Text files', extensions: ['txt'] }],
+  });
+  if (result.canceled || !result.filePath) return false;
+  require('fs').writeFileSync(result.filePath, content, 'utf8');
+  return true;
+});
+
 // ── IPC: Get network/drive locations ─────────────────────────────────────────
 // Platform-aware detection feeding into one unified location format:
 //   { label, path, icon: 'home'|'desktop'|'documents'|'downloads'|'pictures'|

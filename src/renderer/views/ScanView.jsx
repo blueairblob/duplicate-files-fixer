@@ -38,12 +38,16 @@ export default function ScanView({ scanConfig, onComplete, onCancel }) {
       return () => clearInterval(interval);
     }
 
+    // Remove any stale listener first — guards against React strict-mode
+    // double-invoke and any prior mount that didn't clean up cleanly.
+    api.removeScanProgress();
+
     api.onScanProgress(({ scanned: n, phase: p, total: t, currentPath: cp }) => {
       if (cancelled.current) return;
-      setScanned(n);
-      if (p)              setPhase(p);
-      if (t)              setTotal(t);
-      if (cp !== undefined) setCurrentPath(cp);
+      if (typeof n === 'number') setScanned(n);
+      if (p)                     setPhase(p);
+      if (typeof t === 'number' && t > 0) setTotal(t);
+      if (cp)                    setCurrentPath(cp);
     });
 
     api.startScan({ mode, protectedFolders, targetFolders, filters, autoMarkRule, includeEmpty })
