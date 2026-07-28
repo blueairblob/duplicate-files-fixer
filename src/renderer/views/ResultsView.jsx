@@ -42,6 +42,7 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
   const [search, setSearch] = useState('');
   const [deleting, setDeleting] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [ackWipeout, setAckWipeout] = useState(false);
   const [warningsOpen, setWarningsOpen] = useState(false);
 
   const filteredGroups = useMemo(() => {
@@ -57,6 +58,14 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
   const markedBytes = groups.flatMap(g => g.files)
     .filter(f => marked.has(f.path))
     .reduce((a, f) => a + f.size, 0);
+
+  // Groups where every copy has been marked — deleting leaves no surviving copy
+  // at all. Occasionally intended, but the single easiest way to lose real data,
+  // so it must be acknowledged explicitly before the delete proceeds.
+  const noSurvivorGroups = useMemo(
+    () => groups.filter(g => g.files.length > 0 && g.files.every(f => marked.has(f.path))),
+    [groups, marked]
+  );
 
   const toggleFile = useCallback((path, isProtected) => {
     if (isProtected) return; // protected files can never be toggled
@@ -354,7 +363,7 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
           </div>
 
           <button
-            onClick={() => markedCount > 0 && setConfirmOpen(true)}
+            onClick={() => { if (markedCount > 0) { setAckWipeout(false); setConfirmOpen(true); } }}
             disabled={markedCount === 0 || deleting}
             style={{
               ...btnDanger, marginTop:'auto',
@@ -382,9 +391,40 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
             <p style={{ fontSize: scale(13), color:'var(--text-secondary)', marginBottom: scale(20) }}>
               {markedCount} file{markedCount !== 1 ? 's' : ''} ({formatSize(markedBytes)}) will be moved to the Recycle Bin.
             </p>
+
+            {noSurvivorGroups.length > 0 && (
+              <div style={{
+                background:'var(--red-dim)', border:'1px solid var(--red)',
+                borderRadius:'var(--radius-sm)', padding:`${scale(10)}px ${scale(12)}px`,
+                marginBottom: scale(16),
+              }}>
+                <p style={{ fontSize: scale(11), color:'var(--red)', fontWeight:700, marginBottom: scale(4) }}>
+                  ⚠ No copy will remain
+                </p>
+                <p style={{ fontSize: scale(10), color:'var(--text-secondary)', lineHeight:1.5, marginBottom: scale(8) }}>
+                  {noSurvivorGroups.length} group{noSurvivorGroups.length !== 1 ? 's have' : ' has'} every copy marked — after this
+                  delete there will be no remaining copy of {noSurvivorGroups.length !== 1 ? 'those files' : 'that file'}.
+                </p>
+                <label style={{ display:'flex', alignItems:'center', gap: scale(8), cursor:'pointer' }}>
+                  <input type="checkbox" checked={ackWipeout} onChange={e => setAckWipeout(e.target.checked)} />
+                  <span style={{ fontSize: scale(10), color:'var(--text-secondary)' }}>
+                    I understand this removes the only remaining copies.
+                  </span>
+                </label>
+              </div>
+            )}
+
             <div style={{ display:'flex', gap: scale(10), justifyContent:'flex-end' }}>
               <button onClick={() => setConfirmOpen(false)} style={btnSecondary}>Cancel</button>
-              <button onClick={handleDelete} style={btnDanger}>Delete marked</button>
+              <button
+                onClick={handleDelete}
+                disabled={noSurvivorGroups.length > 0 && !ackWipeout}
+                style={{
+                  ...btnDanger,
+                  opacity: (noSurvivorGroups.length > 0 && !ackWipeout) ? 0.4 : 1,
+                  cursor: (noSurvivorGroups.length > 0 && !ackWipeout) ? 'not-allowed' : 'pointer',
+                }}
+              >Delete marked</button>
             </div>
           </div>
         </div>

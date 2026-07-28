@@ -3,6 +3,7 @@ const { Worker } = require('worker_threads');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const crypto = require('crypto');
 const { DEFAULT_EXCLUSIONS } = require('./exclusions');
 
 const isDev = process.env.NODE_ENV === 'development';
@@ -367,6 +368,7 @@ ipcMain.handle('scan:start', async (event, opts) => {
         autoMarkRule: opts.autoMarkRule,
         exclusions: exclusionList,
         includeEmpty: !!opts.includeEmpty,
+        concurrency: opts.concurrency, // undefined → worker defaults to 16
       },
     });
     activeWorker = worker;
@@ -427,8 +429,18 @@ function quarantineFile(filePath) {
   ensureQuarantineDir();
   const basename = path.basename(filePath);
   const stamp = Date.now();
-  const quarantinedName = `${stamp}_${basename}`;
-  const destPath = path.join(QUARANTINE_DIR, quarantinedName);
+
+  // Guarantee a unique destination. Date.now() alone collides when several files
+  // sharing a basename are deleted within the same millisecond (common in a bulk
+  // delete), and a bare renameSync would then silently overwrite the earlier
+  // quarantined copy — losing recoverable data and leaving two manifest entries
+  // pointing at one file.
+  let destPath;
+  do {
+    const rand = crypto.randomBytes(4).toString('hex');
+    destPath = path.join(QUARANTINE_DIR, `${stamp}_${rand}_${basename}`);
+  } while (fs.existsSync(destPath));
+
   fs.renameSync(filePath, destPath);
   appendManifest({
     originalPath: filePath,
@@ -485,6 +497,16 @@ ipcMain.handle('files:restoreFromQuarantine', async (event, quarantinePath) => {
     let manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf8'));
     const entry = manifest.find(e => e.quarantinePath === quarantinePath);
     if (!entry) return { success: false, error: 'Not found in manifest' };
+
+    // Refuse to overwrite a file that now lives at the original location —
+    // silently clobbering it would just relocate the data loss.
+    if (fs.existsSync(entry.originalPath)) {
+      return { success: false, error: 'A file already exists at the original location' };
+    }
+
+    // The original parent folder may have been removed since deletion; recreate
+    // it so the restore can't fail on a missing directory.
+    fs.mkdirSync(path.dirname(entry.originalPath), { recursive: true });
 
     fs.renameSync(entry.quarantinePath, entry.originalPath);
     manifest = manifest.filter(e => e.quarantinePath !== quarantinePath);
