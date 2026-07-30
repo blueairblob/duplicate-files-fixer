@@ -1,26 +1,33 @@
 # Duplicate Files Fixer — Desktop Prototype
 
-A working Electron + React prototype covering the core features from the PRD, now through **Sprint 1** of the development plan (see `PLAN.md`).
+A working Electron + React prototype covering the core features from the PRD (see `PLAN.md`).
 
 - Folder selection (browse, location picker, or drag-and-drop)
 - File type and size filters
-- **Two-pass SHA-256 duplicate detection** — size-grouped first, only same-size files are hashed
-- **Background worker thread scanning** — UI stays responsive, scans are cancellable mid-walk
-- Compare mode: protected source vs. scan target, with shield badges on protected files
+- **Three-pass SHA-256 duplicate detection** — files are grouped by size, then only same-size files get a cheap boundary hash (first + last 64 KB), and only boundary-hash collisions get a full SHA-256. True duplicates are always confirmed by full content hash.
+- **Concurrent worker-thread scanning** — the scan runs off the UI thread using async I/O through a bounded concurrency pool (default 16 in flight). This hides per-file latency on NAS/network drives and keeps the worker responsive, so progress keeps flowing and Cancel takes effect immediately mid-walk.
+- **Three scan modes:**
+  - *Simple* — find duplicates within one or more folders
+  - *Compare* — protected source vs. scan target, with shield badges on protected files (never selectable for deletion)
+  - *Verify* — check that every file on a target (e.g. desktop) is backed up on a protected location (e.g. NAS); reports backed-up / not-on-NAS / NAS-only
 - Auto-mark rules: protected-wins, keep-newest, keep-oldest, keep-largest
+- **No-survivor guard** — deleting *every* copy in a group requires explicit acknowledgement, so you can't accidentally erase the last copy of a file
 - **Exclusion list** — pre-populated defaults (`node_modules`, `.git`, system folders, cloud sync caches), editable in-app
 - **Zero-byte file detection** — grouped separately from content duplicates
 - **Scan warnings panel** — permission errors, locked files, etc. surfaced instead of silently skipped
 - Manual selection override, Select All / Deselect All
-- Confirm → delete, with **Linux/WSL trash fallback**: if the OS trash fails, files move to an in-app quarantine folder (`~/.dff-quarantine/`) with a recovery manifest, instead of being silently lost
+- Confirm → delete to the **system Recycle Bin**, with a **quarantine fallback**: if the OS trash can't be reached (common on Linux/WSL), files move to an in-app quarantine folder (`~/.dff-quarantine/`) with a recovery manifest instead of being lost
+- **Recovery panel** — browse the in-app quarantine and restore files back to their original location
 - Post-deletion summary screen
 
 ---
 
 ## Requirements
 
-- **Node.js** 18+ (https://nodejs.org)
-- Tested on **Windows 11**, **Linux/WSL**, and designed to run on **macOS** (untested on real hardware — see Sprint 2 notes)
+- **Node.js 20.12 or newer** (Node 22 LTS or 24 recommended). The toolchain uses Vite 8, which relies on `util.styleText`; **Node 18 will crash on launch.**
+- Tested on **Windows 11** and **Linux/WSL**; designed to run on **macOS** (untested on real hardware).
+
+> **Running on Windows with a NAS?** Run the app natively on Windows, not inside WSL. WSL reaches Windows/NAS paths through a translation layer that makes file scanning dramatically slower.
 
 ---
 
@@ -30,11 +37,15 @@ A working Electron + React prototype covering the core features from the PRD, no
 # 1. Install dependencies
 npm install
 
-# 2. Run in development mode (opens Electron + hot-reload React)
+# 2. Run in development mode (Electron + hot-reload React)
 npm run dev
 ```
 
-> **Note:** The first `npm install` will download the Electron binary (~100MB). This only happens once.
+Notes:
+
+- The first `npm install` downloads the Electron binary (~100 MB). This happens once.
+- A project `.npmrc` sets `legacy-peer-deps=true`. This is intentional: `@vitejs/plugin-react`'s declared peer range predates Vite 8, but the plugin works with it. The flag lets `npm install` proceed without `--force`.
+- `NODE_ENV` is set via `cross-env` in the `dev:electron` script, so `npm run dev` works the same on Windows, macOS, and Linux.
 
 ---
 
@@ -44,12 +55,11 @@ npm run dev
 npx vitest run
 ```
 
-45 tests across three suites:
-- `src/tests/scanLogic.test.js` — file inclusion filters, auto-mark rules (all 4), edge cases
-- `src/tests/exclusions.test.js` — exclusion list matching: exact names, glob patterns, path prefixes
-- `src/tests/twoPassScan.test.js` — the size-grouping logic that makes two-pass scanning fast
+Unit suites live in `src/tests/` and cover file-inclusion filters and auto-mark rules (`scanLogic`), exclusion matching by name/glob/path-prefix (`exclusions`), and the size-grouping that makes scanning fast (`twoPassScan`), among others.
 
-The scan worker, quarantine fallback, and cancellation signal have also been verified with live smoke tests against a real file tree (not part of the automated suite, since they need actual disk I/O and a worker thread — see Sprint 1 notes in `PLAN.md` for what was checked).
+> There is no `npm test` script wired up; use `npx vitest run` (add `"test": "vitest run"` to `package.json` if you want `npm test`).
+
+The scan worker, quarantine fallback, and cancellation signal are additionally verified with live smoke tests against a real file tree (not part of the automated suite, since they need actual disk I/O and a worker thread).
 
 ---
 
@@ -58,12 +68,12 @@ The scan worker, quarantine fallback, and cancellation signal have also been ver
 ```
 ├── src/
 │   ├── main/
-│   │   ├── main.js          ← Electron main process: IPC, worker lifecycle, delete/quarantine
+│   │   ├── main.js          ← Electron main process: IPC, worker lifecycle, delete/quarantine/restore
 │   │   ├── preload.js       ← Secure IPC bridge to renderer
-│   │   ├── scanWorker.js    ← Runs in worker_threads — two-pass SHA-256 scan, cancellable
+│   │   ├── scanWorker.js    ← Runs in worker_threads — async concurrent three-pass SHA-256 scan, cancellable
 │   │   └── exclusions.js    ← Pure exclusion-matching logic (name/glob/path-prefix)
 │   └── renderer/
-│       ├── main.jsx         ← React entry point
+│       ├── main.jsx         ← React entry point (StrictMode)
 │       ├── App.jsx          ← View state machine
 │       ├── index.css        ← Design tokens + global styles
 │       ├── components/
@@ -71,10 +81,12 @@ The scan worker, quarantine fallback, and cancellation signal have also been ver
 │       │   ├── LocationPicker.jsx       ← Home/Documents/Drives/Network browser
 │       │   └── ExclusionListPanel.jsx   ← Editable exclusion list UI
 │       └── views/
-│           ├── HomeView.jsx     ← Mode select, folder zones, filters, exclusions
-│           ├── ScanView.jsx     ← Two-phase progress (walk → hash), real cancel
-│           ├── ResultsView.jsx  ← Duplicate groups, shield badges, warnings panel
-│           └── DoneView.jsx     ← Summary, quarantine notice if trash fallback used
+│           ├── HomeView.jsx           ← Mode select, folder zones, filters, exclusions, recovery entry
+│           ├── ScanView.jsx           ← Live progress (walk → hash → verify), real cancel
+│           ├── ResultsView.jsx        ← Duplicate groups, shield badges, warnings, no-survivor guard
+│           ├── VerifyResultsView.jsx  ← Backup-coverage report for Verify mode
+│           ├── RecoveryView.jsx       ← Browse + restore in-app quarantine
+│           └── DoneView.jsx           ← Summary, quarantine notice if trash fallback used
 ├── src/tests/                ← Vitest unit tests
 ├── index.html                ← Vite entry
 ├── vite.config.js
@@ -83,26 +95,41 @@ The scan worker, quarantine fallback, and cancellation signal have also been ver
 
 ---
 
-## Core Feature Coverage (from PRD + Sprint 1)
+## Recovering deleted files
+
+Deletion tries three routes, in order:
+
+1. **System Recycle Bin** (`shell.trashItem`) — the normal path on Windows/macOS. Recover these the usual way, from the OS Recycle Bin / Trash on your desktop.
+2. **In-app quarantine** — used only when the OS trash can't be reached. Files move to `~/.dff-quarantine/` with a manifest. Browse and restore them from the **Recover deleted files** panel on the home screen. Restore refuses to overwrite a file that has since reappeared at the original path, and recreates the parent folder if it was removed.
+3. **Permanent delete** — last resort only, if both of the above fail.
+
+The Recovery panel shows the in-app quarantine only — not the system Recycle Bin. On native Windows the panel is usually empty, because deletes succeed to the Recycle Bin.
+
+---
+
+## Core Feature Coverage
 
 | Feature | Implemented |
 |---|---|
-| Hash-based duplicate detection | ✅ SHA-256, two-pass (size-grouped, collision-safe) |
-| File type filters | ✅ Photos, Audio, Video, Docs, Archives |
-| Size filter | ✅ Configurable minimum |
+| Hash-based duplicate detection | ✅ SHA-256, three-pass (size → boundary → full hash) |
+| Concurrent, non-blocking scan | ✅ Worker thread, async I/O, bounded concurrency pool |
+| Scan cancellation | ✅ Responsive mid-walk |
+| File type / size filters | ✅ Photos, Audio, Video, Docs, Archives; configurable min size |
 | Drag-and-drop folders | ✅ |
 | Location picker | ✅ Home/Documents/Drives/USB/Network, cross-platform |
+| Simple mode | ✅ Find duplicates within folders |
 | Compare mode (protected vs target) | ✅ Shield badges, protected files never selectable |
+| Verify mode (backup coverage) | ✅ Backed-up / not-on-NAS / NAS-only report |
 | Auto-mark rules | ✅ 4 rules incl. protected-wins |
+| No-survivor guard | ✅ Explicit acknowledgement before erasing a group's last copy |
 | Exclusion list | ✅ Editable, pre-populated defaults |
 | Zero-byte file detection | ✅ Separate grouping |
-| Non-blocking scan | ✅ Worker thread, UI stays responsive |
-| Scan cancellation | ✅ Verified mid-walk |
 | Scan error surfacing | ✅ Warnings panel |
 | Grouped results display | ✅ Collapsible groups |
 | Manual override | ✅ Click to toggle |
 | Confirm before delete | ✅ Modal dialog |
-| Safe deletion | ✅ Recycle Bin, with Linux quarantine fallback + manifest |
+| Safe deletion | ✅ Recycle Bin, with quarantine fallback + manifest |
+| Recover deleted files | ✅ In-app quarantine browse + restore |
 | Post-deletion summary | ✅ Animated counter + stats |
 
 ---
@@ -115,11 +142,10 @@ npm run build
 
 Output: `release/` folder containing an NSIS installer.
 
+> `npm run build` (electron-builder) is where the dev-only `brace-expansion` audit advisories and the blocked `electron-winstaller` install script live. They don't affect `npm run dev`; address them when you cut an installer.
+
 ---
 
-## Next: Sprint 2
+## Roadmap
 
-- Enhanced cross-platform folder browser modal (left: locations, centre: live tree, right: confirm)
-- Platform-aware location detection rewrite (PowerShell `Get-PSDrive`/`Get-SmbMapping` on Windows, `/Volumes` on macOS)
-
-See `PLAN.md` for the full roadmap (Sprints 2–5).
+See `PLAN.md` for the full roadmap (Sprints 2–5), including the enhanced cross-platform folder browser and the platform-aware location detection rewrite.
