@@ -123,9 +123,9 @@ function FolderZone({ label, sublabel, accent, folders, onAddPath, onRemove }) {
 
 
 // ── Main view ─────────────────────────────────────────────────────────────────
-export default function HomeView({ onStartScan }) {
+export default function HomeView({ onStartScan, onOpenRecovery }) {
   const { scale } = useDPR();
-  const { btnPrimary } = makeStyles(scale);
+  const { btnPrimary, btnSm } = makeStyles(scale);
   const [mode, setMode] = useState('compare');
   const [protectedFolders, setProtectedFolders] = useState([]);
   const [targetFolders, setTargetFolders]       = useState([]);
@@ -196,9 +196,16 @@ export default function HomeView({ onStartScan }) {
       {/* Main */}
       <div style={{ flex:1, padding:`${scale(24)}px ${scale(28)}px`, overflowY:'auto', display:'flex', flexDirection:'column', gap: scale(22) }}>
 
-        <div>
-          <h1 style={{ fontSize: scale(21), fontWeight:700, marginBottom: scale(4) }}>Find duplicate files</h1>
-          <p style={{ color:'var(--text-secondary)', fontSize:13 }}>Choose a scan mode, add folders, and configure your rules.</p>
+        <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap: scale(12) }}>
+          <div>
+            <h1 style={{ fontSize: scale(21), fontWeight:700, marginBottom: scale(4) }}>Find duplicate files</h1>
+            <p style={{ color:'var(--text-secondary)', fontSize:13 }}>Choose a scan mode, add folders, and configure your rules.</p>
+          </div>
+          {onOpenRecovery && (
+            <button onClick={onOpenRecovery} style={{ ...btnSm, flexShrink:0, color:'var(--text-secondary)' }}>
+              🗃️ Recover deleted files
+            </button>
+          )}
         </div>
 
         {/* Mode toggle */}
