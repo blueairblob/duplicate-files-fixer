@@ -5,6 +5,7 @@ import ScanView from './views/ScanView.jsx';
 import ResultsView from './views/ResultsView.jsx';
 import VerifyResultsView from './views/VerifyResultsView.jsx';
 import DoneView from './views/DoneView.jsx';
+import RecoveryView from './views/RecoveryView.jsx';
 
 // App-level state machine: home → scanning → results/verify → done
 export default function App() {
@@ -36,12 +37,14 @@ export default function App() {
     setDeleteResult(null);
   }, []);
 
+  const handleOpenRecovery = useCallback(() => setView('recovery'), []);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: 'var(--bg-base)' }}>
       <TitleBar />
       <div style={{ flex: 1, overflow: 'hidden' }}>
         {view === 'home' && (
-          <HomeView onStartScan={handleStartScan} />
+          <HomeView onStartScan={handleStartScan} onOpenRecovery={handleOpenRecovery} />
         )}
         {view === 'scanning' && (
           <ScanView
@@ -70,6 +73,9 @@ export default function App() {
             deleteResult={deleteResult}
             onScanAgain={handleReset}
           />
+        )}
+        {view === 'recovery' && (
+          <RecoveryView onBack={handleReset} />
         )}
       </div>
     </div>

@@ -38,12 +38,19 @@ export default function ScanView({ scanConfig, onComplete, onCancel }) {
       return () => clearInterval(interval);
     }
 
-    // Remove any stale listener first — guards against React strict-mode
-    // double-invoke and any prior mount that didn't clean up cleanly.
+    // Per-run lifecycle flag. In dev, <React.StrictMode> runs this effect twice
+    // (setup → cleanup → setup). A ref shared across runs stays `true` after the
+    // first cleanup, which silently drops all progress and skips onComplete —
+    // i.e. a permanent spinner. A fresh local flag per run means the live scan
+    // is never gagged by a previous run's teardown, and a torn-down run's late
+    // result (e.g. from a terminated worker) can't hijack the screen.
+    let active = true;
+    cancelled.current = false; // clear any stale user-cancel state on (re)mount
+
     api.removeScanProgress();
 
     api.onScanProgress(({ scanned: n, phase: p, total: t, currentPath: cp }) => {
-      if (cancelled.current) return;
+      if (!active || cancelled.current) return;
       if (typeof n === 'number') setScanned(n);
       if (p)                     setPhase(p);
       if (typeof t === 'number' && t > 0) setTotal(t);
@@ -53,17 +60,17 @@ export default function ScanView({ scanConfig, onComplete, onCancel }) {
     api.startScan({ mode, protectedFolders, targetFolders, filters, autoMarkRule, includeEmpty })
       .then(result => {
         api.removeScanProgress();
-        if (!cancelled.current) onComplete(result);
+        if (active && !cancelled.current) onComplete(result);
       })
       .catch(err => {
         api.removeScanProgress();
-        if (!cancelled.current) {
-          onComplete({ groups: [], emptyFiles: [], totalScanned: scanned, totalHashed: 0, warnings: [{ path: '-', reason: err.message }], mode, error: err.message });
+        if (active && !cancelled.current) {
+          onComplete({ groups: [], emptyFiles: [], totalScanned: 0, totalHashed: 0, warnings: [{ path: '-', reason: err.message }], mode, error: err.message });
         }
       });
 
     return () => {
-      cancelled.current = true;
+      active = false;
       api.removeScanProgress();
     };
   }, []); // eslint-disable-line

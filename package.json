@@ -5,7 +5,7 @@
   "main": "src/main/main.js",
   "scripts": {
     "dev:renderer": "vite",
-    "dev:electron": "NODE_ENV=development electron .",
+    "dev:electron": "cross-env NODE_ENV=development electron .",
     "dev": "concurrently \"npm run dev:renderer\" \"wait-on http://localhost:5173 && npm run dev:electron\"",
     "build": "vite build && electron-builder",
     "preview": "vite preview"
@@ -35,6 +35,7 @@
     "@vitejs/plugin-react": "^4.0.0",
     "@vitest/ui": "^4.1.9",
     "concurrently": "^8.2.2",
+    "cross-env": "^10.1.0",
     "electron": "^43.2.0",
     "electron-builder": "^26.15.3",
     "jsdom": "^29.1.1",
