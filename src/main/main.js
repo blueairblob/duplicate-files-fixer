@@ -392,6 +392,22 @@ ipcMain.handle('scan:start', async (event, opts) => {
       activeWorker = null;
       resolve({ groups: [], emptyFiles: [], totalScanned: 0, totalHashed: 0, warnings: [{ path: '-', reason: err.message }], error: err.message });
     });
+	
+	worker.on('error', (err) => {
+      console.error('[scan] worker error:', err);
+    });
+
+    worker.on('exit', (code) => {
+      if (activeWorker === worker) {
+        activeWorker = null;
+        console.error('[scan] worker exited early with code', code);
+        resolve({ groups: [], emptyFiles: [], totalScanned: 0, totalHashed: 0,
+          warnings: [{ path: '-', reason: `Worker exited unexpectedly (code ${code})` }],
+          error: `Worker exited unexpectedly (code ${code})` });
+      }
+    });
+	
+	
   });
 });
 
