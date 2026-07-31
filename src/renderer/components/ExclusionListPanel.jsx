@@ -8,6 +8,7 @@ const DEMO_DEFAULTS = [
   'node_modules', '.git', '.svn', '.hg',
   'System Volume Information', '$RECYCLE.BIN', 'Windows',
   'OneDriveTemp', '.dropbox.cache', '.dff-quarantine',
+  '@eaDir', '#recycle', '#snapshot', '.snapshot',
   '.DS_Store', '.Spotlight-V100', '.Trashes', '.fseventsd',
   '__pycache__', '.cache',
 ];

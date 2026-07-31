@@ -23,6 +23,12 @@ const DEFAULT_EXCLUSIONS = [
   '.Spotlight-V100',
   '.Trashes',
   '.fseventsd',
+  // NAS metadata (Synology/QNAP) — thumbnail/index stores; scanning these over
+  // SMB is slow and produces junk duplicate groups
+  '@eaDir',
+  '#recycle',
+  '#snapshot',
+  '.snapshot',
   // Common temp/cache junk
   '__pycache__',
   '.cache',
