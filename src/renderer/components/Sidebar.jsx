@@ -1,6 +1,6 @@
 import React from 'react';
 import { useDPR } from '../contexts/DPRContext.jsx';
-import { CopyIcon, HistoryIcon, ArchiveIcon, BanIcon, SettingsIcon } from './icons.jsx';
+import { CopyIcon, HistoryIcon, ArchiveIcon, BanIcon, SettingsIcon, SearchIcon, CheckCircleIcon } from './icons.jsx';
 
 // macOS "source list" sidebar. Collapsible via the toolbar toggle in App.jsx.
 // `section` / `onSelectSection` are owned by App so the sidebar persists
@@ -12,7 +12,7 @@ const NAV = [
   { id: 'exclusions', label: 'Exclusions', Icon: BanIcon },
 ];
 
-export default function Sidebar({ section, onSelectSection, onSelectRecent, recentScans = [], quarantineCount = 0 }) {
+export default function Sidebar({ section, onSelectSection, onSelectRecent, recentScans = [], quarantineCount = 0, scanActivity = null, onSelectActivity }) {
   const { scale } = useDPR();
 
   const itemStyle = (active) => ({
@@ -47,6 +47,29 @@ export default function Sidebar({ section, onSelectSection, onSelectRecent, rece
           )}
         </button>
       ))}
+
+      {scanActivity && (
+        <button onClick={onSelectActivity} style={{ ...itemStyle(section === 'activity'), marginTop: scale(10) }}
+          onMouseEnter={e => { if (section !== 'activity') e.currentTarget.style.background = 'var(--bg-hover)'; }}
+          onMouseLeave={e => { if (section !== 'activity') e.currentTarget.style.background = 'transparent'; }}
+        >
+          {scanActivity.status === 'running'
+            ? <SearchIcon size={scale(16)} color="var(--accent)" />
+            : <CheckCircleIcon size={scale(16)} color="var(--success)" />}
+          <span style={{ flex: 1 }}>
+            {scanActivity.status === 'running'
+              ? (scanActivity.pct != null ? `Scanning · ${scanActivity.pct}%` : 'Scanning…')
+              : 'Results ready'}
+          </span>
+          {scanActivity.status === 'complete' && scanActivity.groups != null && (
+            <span style={{
+              fontSize: 'var(--fs-caption)', color: 'var(--text-secondary)',
+              background: 'var(--bg-inset)', borderRadius: 10,
+              padding: `0 ${scale(7)}px`, lineHeight: `${scale(18)}px`,
+            }}>{scanActivity.groups}</span>
+          )}
+        </button>
+      )}
 
       {recentScans.length > 0 && (
         <>

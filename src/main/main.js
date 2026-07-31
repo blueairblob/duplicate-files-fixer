@@ -1,3 +1,9 @@
+// Node's async fs ops run on libuv's thread pool (default: 4 threads). Over
+// SMB each op blocks a thread for a full network round-trip, silently capping
+// the scan worker's 16-wide pool at 4-way. Must be set before any fs use,
+// and worker_threads share this process-wide pool.
+process.env.UV_THREADPOOL_SIZE = process.env.UV_THREADPOOL_SIZE || '64';
+
 const { app, BrowserWindow, ipcMain, dialog, shell, screen } = require('electron');
 const { Worker } = require('worker_threads');
 const path = require('path');

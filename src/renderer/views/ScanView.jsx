@@ -12,29 +12,25 @@ function formatDuration(ms) {
   return `${m}:${String(s % 60).padStart(2, '0')}`;
 }
 
-export default function ScanView({ scanConfig, onComplete, onCancel }) {
+// Purely presentational: the scan itself runs in App (and the main process),
+// so this view can unmount/remount freely while the scan continues.
+export default function ScanView({ scanConfig, progress, startedAt, cancelling, onCancel }) {
   const { scale } = useDPR();
   const { mode, protectedFolders = [], targetFolders = [], filters = {}, autoMarkRule, includeEmpty } = scanConfig || {};
 
-  const [scanned,     setScanned]     = useState(0);
-  // phase: 'walking' | 'hashing' | 'verifying'
-  const [phase,       setPhase]       = useState('walking');
-  const [total,       setTotal]       = useState(0);
-  const [currentPath, setCurrentPath] = useState('');
-  const [cancelling,  setCancelling]  = useState(false);
-  const cancelled = useRef(false);
+  const { scanned = 0, phase = 'walking', total = 0, currentPath = '' } = progress || {};
 
   // ── Throughput instrumentation ──────────────────────────────────────────────
   // Rolling window of (time, scanned) samples so speed reflects the last ~6s
   // rather than the whole run; ETA derives from that live rate.
   const [now, setNow] = useState(() => Date.now());
-  const startRef   = useRef(Date.now());
+  const startRef   = useRef(startedAt || Date.now());
   const samplesRef = useRef([]);
   const scannedRef = useRef(0);
   scannedRef.current = scanned;
 
   useEffect(() => {
-    startRef.current = Date.now();
+    startRef.current = startedAt || startRef.current;
     const tick = setInterval(() => {
       const t = Date.now();
       setNow(t);
@@ -58,66 +54,6 @@ export default function ScanView({ scanConfig, onComplete, onCancel }) {
   const hasDeterminate = phase !== 'walking' && total > 0;
   const remaining = hasDeterminate && rate > 0.2 ? ((total - scanned) / rate) * 1000 : null;
 
-  // ── Scan lifecycle (unchanged behavior) ─────────────────────────────────────
-  useEffect(() => {
-    if (!api) {
-      let n = 0;
-      const interval = setInterval(() => {
-        n += Math.floor(Math.random() * 20) + 5;
-        setScanned(n);
-        if (n > 150) { setPhase('hashing'); setTotal(400); }
-        if (n >= 400) {
-          clearInterval(interval);
-          onComplete({ groups: generateDemoGroups(mode), emptyFiles: [], totalScanned: n, totalHashed: 120, warnings: [], mode });
-        }
-      }, 100);
-      return () => clearInterval(interval);
-    }
-
-    // Per-run lifecycle flag. In dev, <React.StrictMode> runs this effect twice
-    // (setup → cleanup → setup). A ref shared across runs stays `true` after the
-    // first cleanup, which silently drops all progress and skips onComplete —
-    // i.e. a permanent spinner. A fresh local flag per run means the live scan
-    // is never gagged by a previous run's teardown, and a torn-down run's late
-    // result (e.g. from a terminated worker) can't hijack the screen.
-    let active = true;
-    cancelled.current = false; // clear any stale user-cancel state on (re)mount
-
-    api.removeScanProgress();
-
-    api.onScanProgress(({ scanned: n, phase: p, total: t, currentPath: cp }) => {
-      if (!active || cancelled.current) return;
-      if (typeof n === 'number') setScanned(n);
-      if (p)                     setPhase(p);
-      if (typeof t === 'number' && t > 0) setTotal(t);
-      if (cp)                    setCurrentPath(cp);
-    });
-
-    api.startScan({ mode, protectedFolders, targetFolders, filters, autoMarkRule, includeEmpty })
-      .then(result => {
-        api.removeScanProgress();
-        if (active && !cancelled.current) onComplete(result);
-      })
-      .catch(err => {
-        api.removeScanProgress();
-        if (active && !cancelled.current) {
-          onComplete({ groups: [], emptyFiles: [], totalScanned: 0, totalHashed: 0, warnings: [{ path: '-', reason: err.message }], mode, error: err.message });
-        }
-      });
-
-    return () => {
-      active = false;
-      api.removeScanProgress();
-    };
-  }, []); // eslint-disable-line
-
-  const handleCancel = async () => {
-    if (!api) { onCancel(); return; }
-    setCancelling(true);
-    cancelled.current = true;
-    await api.cancelScan();
-    onCancel();
-  };
 
   // ── Phase copy ──────────────────────────────────────────────────────────────
   const phaseTitle = {
@@ -240,7 +176,7 @@ export default function ScanView({ scanConfig, onComplete, onCancel }) {
           />
         </div>
 
-        <button onClick={handleCancel} disabled={cancelling} style={{
+        <button onClick={onCancel} disabled={cancelling} style={{
           background: 'transparent', border: '1px solid var(--border-strong)',
           borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)',
           padding: `${scale(8)}px ${scale(24)}px`, fontSize: 'var(--fs-secondary)',
@@ -276,24 +212,3 @@ function FolderGroup({ label, Icon, color, folders, scale }) {
   );
 }
 
-function generateDemoGroups(mode) {
-  const exts = ['.jpg', '.mp3', '.pdf', '.docx', '.mp4', '.png'];
-  return Array.from({ length: 10 }, (_, i) => {
-    const ext  = exts[i % exts.length];
-    const size = Math.floor(Math.random() * 5000000) + 50000;
-    const count = Math.floor(Math.random() * 2) + 2;
-    const hasProtected = mode === 'compare' && i % 3 !== 0;
-    const files = Array.from({ length: count }, (_, j) => ({
-      path: j === 0 && hasProtected
-        ? `C:\Backup\protected_file_${i}${ext}`
-        : `C:\Users\Demo\Downloads\file_${i}_copy${j}${ext}`,
-      name: j === 0 && hasProtected ? `protected_file_${i}${ext}` : `file_${i}_copy${j}${ext}`,
-      size,
-      modified: new Date(Date.now() - j * 86400000 * 3).toISOString(),
-      ext,
-      sourceLabel: j === 0 && hasProtected ? 'protected' : 'target',
-    }));
-    const autoMarked = files.filter(f => f.sourceLabel === 'target').slice(hasProtected ? 0 : 1).map(f => f.path);
-    return { id: i, hash: `demo_${i}`, files, autoMarked, hasProtected };
-  });
-}
