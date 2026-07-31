@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import FolderBrowserModal from '../components/FolderBrowserModal.jsx';
 import ScanOptionsSheet from '../components/ScanOptionsSheet.jsx';
 import { useDPR } from '../contexts/DPRContext.jsx';
@@ -117,7 +117,7 @@ function FolderZone({ label, sublabel, Icon, iconColor, folders, onAddPath, onRe
 }
 
 // ── Main view ────────────────────────────────────────────────────────────────
-export default function HomeView({ onStartScan, exclusionCount = 0 }) {
+export default function HomeView({ onStartScan, preset = null, exclusionCount = 0 }) {
   const { scale } = useDPR();
   const [mode, setMode] = useState('compare');
   const [protectedFolders, setProtectedFolders] = useState([]);
@@ -128,6 +128,19 @@ export default function HomeView({ onStartScan, exclusionCount = 0 }) {
   const [includeEmpty, setIncludeEmpty] = useState(false);
   const [autoMarkRule, setAutoMarkRule] = useState('protected-wins');
   const [optionsOpen, setOptionsOpen] = useState(false);
+
+  // Seed the form when a history/recents entry is loaded. Keyed so clicking
+  // the same entry twice re-applies it.
+  useEffect(() => {
+    if (!preset) return;
+    setMode(preset.mode || 'compare');
+    if (preset.mode === 'simple') {
+      setSimpleFolders(preset.targetFolders || []);
+    } else {
+      setProtectedFolders(preset.protectedFolders || []);
+      setTargetFolders(preset.targetFolders || []);
+    }
+  }, [preset && preset.key]);
 
   const addPathToZone = (setter, p) => setter(prev => [...new Set([...prev, p])]);
   const toggleType = (id) =>
@@ -252,7 +265,7 @@ export default function HomeView({ onStartScan, exclusionCount = 0 }) {
               overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
             }}>{optionsSummary}</span>
           </span>
-          <ChevronRightIcon size={scale(15)} color="var(--text-muted)" />
+          <ChevronDownIcon size={scale(15)} color="var(--text-muted)" />
         </button>
 
         {/* Start */}

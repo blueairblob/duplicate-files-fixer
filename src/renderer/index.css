@@ -43,7 +43,7 @@
   --fs-caption:   calc(12px * var(--dpr-scale));
 
   --radius-sm: calc(7px  * var(--dpr-scale));
-  --radius-md: calc(10px * var(--dpr-scale));
+  --radius-md: calc(12px * var(--dpr-scale));
   --radius-lg: calc(14px * var(--dpr-scale));
 
   --shadow-card:  0 1px 3px rgba(0, 0, 0, 0.07);
@@ -73,8 +73,8 @@
   --amber-dim:    var(--warning-tint);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
+/* Manual override: <html data-theme="dark"> forces dark mode */
+:root[data-theme="dark"] {
     --bg-window:   #1e1e20;
     --bg-sidebar:  #26262a;
     --bg-card:     #2c2c30;
@@ -100,6 +100,36 @@
 
     --shadow-card:  0 1px 3px rgba(0, 0, 0, 0.35);
     --shadow-sheet: 0 12px 40px rgba(0, 0, 0, 0.55);
+}
+
+/* System preference applies unless the user forced light */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg-window:   #1e1e20;
+      --bg-sidebar:  #26262a;
+      --bg-card:     #2c2c30;
+      --bg-inset:    #232327;
+      --bg-hover:    rgba(255, 255, 255, 0.06);
+
+      --border:        rgba(255, 255, 255, 0.12);
+      --border-strong: rgba(255, 255, 255, 0.22);
+
+      --text-primary:   #f5f5f7;
+      --text-secondary: #b9b9bf;
+      --text-muted:     #85858c;
+
+      --accent:       #409cff;
+      --accent-tint:  rgba(64, 156, 255, 0.16);
+      --on-accent:    #ffffff;
+      --danger:       #ff6961;
+      --danger-tint:  rgba(255, 105, 97, 0.16);
+      --success:      #4fd061;
+      --success-tint: rgba(79, 208, 97, 0.16);
+      --warning:      #ffb340;
+      --warning-tint: rgba(255, 179, 64, 0.16);
+
+      --shadow-card:  0 1px 3px rgba(0, 0, 0, 0.35);
+      --shadow-sheet: 0 12px 40px rgba(0, 0, 0, 0.55);
   }
 }
 

@@ -8,6 +8,10 @@ import ResultsView from './views/ResultsView.jsx';
 import VerifyResultsView from './views/VerifyResultsView.jsx';
 import DoneView from './views/DoneView.jsx';
 import RecoveryView from './views/RecoveryView.jsx';
+import HistoryView from './views/HistoryView.jsx';
+import SettingsView from './views/SettingsView.jsx';
+import { initTheme } from './utils/theme.js';
+import { loadHistory, addHistoryEntry, removeHistoryEntry, clearHistory, entryTitle, entrySubtitle } from './utils/scanHistory.js';
 
 const api = window.electronAPI;
 
@@ -31,6 +35,8 @@ export default function App() {
   const [scanResult, setScanResult] = useState(null);
   const [deleteResult, setDeleteResult] = useState(null);
   const [quarantineCount, setQuarantineCount] = useState(0);
+  const [history, setHistory] = useState(loadHistory);
+  const [preset, setPreset] = useState(null); // { key, mode, protectedFolders, targetFolders }
 
   // Keep the sidebar badge in sync with the quarantine manifest. Refreshed on
   // mount and whenever a flow that can change it completes (delete / restore).
@@ -44,7 +50,10 @@ export default function App() {
     }
   }, []);
 
-  useEffect(() => { refreshQuarantineCount(); }, [refreshQuarantineCount]);
+  useEffect(() => {
+    initTheme();
+    refreshQuarantineCount();
+  }, [refreshQuarantineCount]);
 
   const handleStartScan = useCallback((config) => {
     setScanConfig(config);
@@ -54,6 +63,10 @@ export default function App() {
   const handleScanComplete = useCallback((result) => {
     setScanResult(result);
     setView(result.mode === 'verify' ? 'verify' : 'results');
+    setScanConfig(cfg => {
+      if (cfg) setHistory(addHistoryEntry(cfg, result));
+      return cfg;
+    });
   }, []);
 
   const handleDeleteComplete = useCallback((result) => {
@@ -70,6 +83,20 @@ export default function App() {
     setDeleteResult(null);
     refreshQuarantineCount();
   }, [refreshQuarantineCount]);
+
+  const handleLoadEntry = useCallback((entry) => {
+    setPreset({
+      key: `${entry.id}-${Date.now()}`, // unique per click so re-loading works
+      mode: entry.mode,
+      protectedFolders: entry.protectedFolders,
+      targetFolders: entry.targetFolders,
+    });
+    setView('home');
+    setSection('scan');
+    setScanConfig(null);
+    setScanResult(null);
+    setDeleteResult(null);
+  }, []);
 
   const handleSelectSection = useCallback((id) => {
     setSection(id);
@@ -100,12 +127,14 @@ export default function App() {
             section={inScanFlow ? 'scan' : section}
             onSelectSection={handleSelectSection}
             quarantineCount={quarantineCount}
+            recentScans={history.slice(0, 3).map(e => ({ id: e.id, title: entryTitle(e), subtitle: entrySubtitle(e), entry: e }))}
+            onSelectRecent={handleLoadEntry}
           />
         )}
 
         <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
           {view === 'home' && section === 'scan' && (
-            <HomeView onStartScan={handleStartScan} />
+            <HomeView onStartScan={handleStartScan} preset={preset} />
           )}
           {view === 'home' && section === 'quarantine' && (
             <RecoveryView onBack={() => { setSection('scan'); refreshQuarantineCount(); }} />
@@ -115,13 +144,16 @@ export default function App() {
               <ExclusionListPanel />
             </SectionPage>
           )}
-          {view === 'home' && (section === 'history' || section === 'settings') && (
-            <SectionPage
-              title={SECTION_TITLES[section]}
-              subtitle={section === 'history'
-                ? 'Past scans will appear here.'
-                : 'App preferences will live here.'}
+          {view === 'home' && section === 'history' && (
+            <HistoryView
+              entries={history}
+              onLoadEntry={handleLoadEntry}
+              onRemoveEntry={(id) => setHistory(removeHistoryEntry(id))}
+              onClearAll={() => setHistory(clearHistory())}
             />
+          )}
+          {view === 'home' && section === 'settings' && (
+            <SettingsView />
           )}
 
           {view === 'scanning' && (

@@ -12,7 +12,7 @@ const NAV = [
   { id: 'exclusions', label: 'Exclusions', Icon: BanIcon },
 ];
 
-export default function Sidebar({ section, onSelectSection, recentScans = [], quarantineCount = 0 }) {
+export default function Sidebar({ section, onSelectSection, onSelectRecent, recentScans = [], quarantineCount = 0 }) {
   const { scale } = useDPR();
 
   const itemStyle = (active) => ({
@@ -55,7 +55,7 @@ export default function Sidebar({ section, onSelectSection, recentScans = [], qu
             margin: `${scale(16)}px ${scale(10)}px ${scale(4)}px`,
           }}>Recent</p>
           {recentScans.map((s) => (
-            <button key={s.id} onClick={() => onSelectSection('history', s.id)}
+            <button key={s.id} onClick={() => onSelectRecent && onSelectRecent(s.entry)}
               style={{ ...itemStyle(false), display: 'block' }}
               onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-hover)'}
               onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
