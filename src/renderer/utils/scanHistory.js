@@ -17,19 +17,35 @@ function persist(list) {
   try { localStorage.setItem(KEY, JSON.stringify(list)); } catch { /* non-fatal */ }
 }
 
-// config: the object HomeView passes to onStartScan.
-// result: the scan result (used only for summary counts; may be partial).
-export function addHistoryEntry(config, result) {
+// Called when a scan STARTS, so abandoned attempts are retryable from
+// History/Recents. Returns { list, id }; pass the id to updateHistoryEntry
+// when (if) the scan completes.
+export function addHistoryEntry(config) {
   const entry = {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     date: new Date().toISOString(),
     mode: config.mode,
     protectedFolders: config.protectedFolders || [],
     targetFolders: config.targetFolders || [],
-    duplicateGroups: Array.isArray(result?.groups) ? result.groups.length : 0,
-    totalScanned: result?.totalScanned ?? 0,
+    status: 'started',        // 'started' | 'complete'
+    duplicateGroups: null,
+    totalScanned: 0,
   };
   const list = [entry, ...loadHistory()].slice(0, MAX_ENTRIES);
+  persist(list);
+  return { list, id: entry.id };
+}
+
+// Called when a scan completes; fills in the summary counts.
+export function updateHistoryEntry(id, result) {
+  const list = loadHistory().map(e => e.id === id
+    ? {
+        ...e,
+        status: 'complete',
+        duplicateGroups: Array.isArray(result?.groups) ? result.groups.length : 0,
+        totalScanned: result?.totalScanned ?? 0,
+      }
+    : e);
   persist(list);
   return list;
 }
@@ -69,6 +85,7 @@ export function entrySubtitle(e) {
   const when = sameDay(d, today) ? 'Today'
     : sameDay(d, yesterday) ? 'Yesterday'
     : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+  if (e.status !== 'complete') return `${when} \u00b7 not completed`;
   const dupes = e.mode === 'verify' ? MODE_LABELS.verify : `${e.duplicateGroups} dupes`;
   return `${when} \u00b7 ${dupes}`;
 }

@@ -61,7 +61,7 @@ export default function HistoryView({ entries, onLoadEntry, onRemoveEntry, onCle
                       overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                     }}>{entryTitle(e)}</p>
                     <p style={{ fontSize: 'var(--fs-caption)', color: 'var(--text-muted)', margin: `${scale(1)}px 0 0` }}>
-                      {entrySubtitle(e)} · {e.totalScanned.toLocaleString()} files scanned
+                      {entrySubtitle(e)}{e.status === 'complete' ? ` · ${e.totalScanned.toLocaleString()} files scanned` : ''}
                     </p>
                   </div>
                   <span style={{

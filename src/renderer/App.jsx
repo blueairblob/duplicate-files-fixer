@@ -11,7 +11,7 @@ import RecoveryView from './views/RecoveryView.jsx';
 import HistoryView from './views/HistoryView.jsx';
 import SettingsView from './views/SettingsView.jsx';
 import { initTheme } from './utils/theme.js';
-import { loadHistory, addHistoryEntry, removeHistoryEntry, clearHistory, entryTitle, entrySubtitle } from './utils/scanHistory.js';
+import { loadHistory, addHistoryEntry, updateHistoryEntry, removeHistoryEntry, clearHistory, entryTitle, entrySubtitle } from './utils/scanHistory.js';
 
 const api = window.electronAPI;
 
@@ -42,6 +42,7 @@ export default function App() {
   const viewRef = useRef(view);   viewRef.current = view;
   const runIdRef = useRef(0);     // invalidates stale completions after cancel/new scan
   const demoTimerRef = useRef(null);
+  const historyIdRef = useRef(null); // history entry for the current run
 
   const refreshQuarantineCount = useCallback(async () => {
     if (!api?.getQuarantineManifest) return;
@@ -60,7 +61,7 @@ export default function App() {
   const completeScan = useCallback((runId, config, result) => {
     if (runId !== runIdRef.current) return; // cancelled or superseded
     setScan(s => (s && s.status === 'running' ? { ...s, status: 'complete', result } : s));
-    setHistory(addHistoryEntry(config, result));
+    if (historyIdRef.current) setHistory(updateHistoryEntry(historyIdRef.current, result));
     // Only yank the user to results if they're actually watching the scan
     if (viewRef.current === 'scanning') {
       setView(result.mode === 'verify' ? 'verify' : 'results');
@@ -76,6 +77,13 @@ export default function App() {
 
     setCancelling(false);
     setDeleteResult(null);
+    // Record the attempt immediately — an abandoned scan should be one click
+    // away in Recents/History.
+    {
+      const { list, id } = addHistoryEntry(config);
+      setHistory(list);
+      historyIdRef.current = id;
+    }
     setScan({
       status: 'running', config, startedAt: Date.now(),
       progress: { scanned: 0, phase: 'walking', total: 0, currentPath: '' },
