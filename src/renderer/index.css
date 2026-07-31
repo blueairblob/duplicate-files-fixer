@@ -1,42 +1,106 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
-
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* ─────────────────────────────────────────────────────────────────────────────
+   Semantic design tokens — light first, dark via prefers-color-scheme.
+   Layered like: palette → semantic surfaces/text → legacy aliases.
+   ──────────────────────────────────────────────────────────────────────────── */
 :root {
-  --bg-base:      #0d0f14;
-  --bg-surface:   #13161e;
-  --bg-elevated:  #1a1d27;
-  --bg-hover:     #1f2330;
-  --border:       #252833;
-  --border-light: #2e3244;
+  /* Surfaces */
+  --bg-window:   #f5f5f7;   /* window canvas */
+  --bg-sidebar:  #ececee;   /* source-list panel */
+  --bg-card:     #ffffff;   /* raised content cards */
+  --bg-inset:    #eef0f2;   /* wells: segmented control track, badges */
+  --bg-hover:    rgba(0, 0, 0, 0.045);
 
-  --teal:         #00c4a0;
-  --teal-dim:     #00c4a018;
-  --teal-glow:    #00c4a030;
-  --red:          #f05a5a;
-  --red-dim:      #f05a5a18;
-  --amber:        #f5a623;
-  --amber-dim:    #f5a62318;
+  /* Borders — structure comes from spacing; borders are hairlines only */
+  --border:        rgba(0, 0, 0, 0.10);
+  --border-strong: rgba(0, 0, 0, 0.20);
 
-  --text-primary:   #e8eaf2;
-  --text-secondary: #8890a8;
-  --text-muted:     #4e5568;
+  /* Text */
+  --text-primary:   #1d1d1f;
+  --text-secondary: #5d5d63;
+  --text-muted:     #8e8e93;
 
-  /* Base radius values, authored at the 1.0 / 13px baseline. --dpr-scale is set
-     at runtime by useDPR() (defaults to 1 until the hook mounts, so there's no
-     flash of incorrectly-sized chrome on first paint). Components that need a
-     radius in an inline style should use scale() from useDPR() directly so JS
-     and CSS stay in lockstep; these vars cover plain-CSS usages. */
+  /* Accent + semantic colors */
+  --accent:       #0071e3;
+  --accent-tint:  rgba(0, 113, 227, 0.10);
+  --on-accent:    #ffffff;
+  --danger:       #d9302c;
+  --danger-tint:  rgba(217, 48, 44, 0.10);
+  --success:      #1f8a3b;
+  --success-tint: rgba(31, 138, 59, 0.10);
+  --warning:      #b96b00;
+  --warning-tint: rgba(185, 107, 0, 0.12);
+
+  /* Type scale — authored at the 13px/1.0 DPR baseline and multiplied by
+     --dpr-scale (written at runtime by useDPR). Nothing below caption. */
   --dpr-scale: 1;
   --dpr-base-font: 13px;
-  --radius-sm: calc(6px * var(--dpr-scale));
+  --fs-title:     calc(22px * var(--dpr-scale));
+  --fs-heading:   calc(15px * var(--dpr-scale));
+  --fs-body:      calc(14px * var(--dpr-scale));
+  --fs-secondary: calc(13px * var(--dpr-scale));
+  --fs-caption:   calc(12px * var(--dpr-scale));
+
+  --radius-sm: calc(7px  * var(--dpr-scale));
   --radius-md: calc(10px * var(--dpr-scale));
   --radius-lg: calc(14px * var(--dpr-scale));
 
-  --font-sans: 'Inter', system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', monospace;
+  --shadow-card:  0 1px 3px rgba(0, 0, 0, 0.07);
+  --shadow-sheet: 0 12px 40px rgba(0, 0, 0, 0.22);
 
-  --titlebar-h: 38px;
+  --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text',
+               'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Code', Consolas, monospace;
+
+  --titlebar-h: 44px;
+  --sidebar-w: 210px;
+
+  /* ── Legacy aliases ─────────────────────────────────────────────────────
+     Older views (ScanView, ResultsView, …) still reference the original
+     variable names. Mapping them here means they pick up the light theme
+     for free until each is migrated, after which this block can be deleted. */
+  --bg-base:      var(--bg-window);
+  --bg-surface:   var(--bg-sidebar);
+  --bg-elevated:  var(--bg-card);
+  --border-light: var(--border-strong);
+  --teal:         var(--accent);
+  --teal-dim:     var(--accent-tint);
+  --teal-glow:    var(--accent-tint);
+  --red:          var(--danger);
+  --red-dim:      var(--danger-tint);
+  --amber:        var(--warning);
+  --amber-dim:    var(--warning-tint);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-window:   #1e1e20;
+    --bg-sidebar:  #26262a;
+    --bg-card:     #2c2c30;
+    --bg-inset:    #232327;
+    --bg-hover:    rgba(255, 255, 255, 0.06);
+
+    --border:        rgba(255, 255, 255, 0.12);
+    --border-strong: rgba(255, 255, 255, 0.22);
+
+    --text-primary:   #f5f5f7;
+    --text-secondary: #b9b9bf;
+    --text-muted:     #85858c;
+
+    --accent:       #409cff;
+    --accent-tint:  rgba(64, 156, 255, 0.16);
+    --on-accent:    #ffffff;
+    --danger:       #ff6961;
+    --danger-tint:  rgba(255, 105, 97, 0.16);
+    --success:      #4fd061;
+    --success-tint: rgba(79, 208, 97, 0.16);
+    --warning:      #ffb340;
+    --warning-tint: rgba(255, 179, 64, 0.16);
+
+    --shadow-card:  0 1px 3px rgba(0, 0, 0, 0.35);
+    --shadow-sheet: 0 12px 40px rgba(0, 0, 0, 0.55);
+  }
 }
 
 html, body, #root {
@@ -47,18 +111,17 @@ html, body, #root {
 
 body {
   font-family: var(--font-sans);
-  background: var(--bg-base);
+  background: var(--bg-window);
   color: var(--text-primary);
-  font-size: var(--dpr-base-font);
+  font-size: var(--fs-body);
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   user-select: none;
 }
 
-/* Scrollbars */
-::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar { width: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--border-light); border-radius: 3px; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
 
 button {
@@ -66,7 +129,7 @@ button {
   cursor: pointer;
   border: none;
   outline: none;
-  transition: all 0.15s ease;
+  transition: background 0.12s ease, border-color 0.12s ease, opacity 0.12s ease;
 }
 
 input, select {
