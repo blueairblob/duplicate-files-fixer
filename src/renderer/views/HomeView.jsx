@@ -4,7 +4,7 @@ import ScanOptionsSheet from '../components/ScanOptionsSheet.jsx';
 import { useDPR } from '../contexts/DPRContext.jsx';
 import {
   FolderIcon, ShieldIcon, TargetIcon, XIcon, PlusIcon,
-  SlidersIcon, ChevronRightIcon, LockIcon, SearchIcon,
+  SlidersIcon, ChevronRightIcon, ChevronDownIcon, LockIcon, SearchIcon,
 } from '../components/icons.jsx';
 
 const api = window.electronAPI;
