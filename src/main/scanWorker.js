@@ -24,7 +24,7 @@ const { isExcluded } = require('./exclusions');
 // How many I/O operations to keep in flight at once. Tunable via scan options;
 // 16 is a good default for a NAS. Local SSDs can go higher, but the returns
 // flatten quickly and very high values can starve the event loop.
-const CONCURRENCY = Math.max(1, Number(workerData.concurrency) || 16);
+const CONCURRENCY = Math.max(1, Number(workerData.concurrency) || 32);
 
 const SUPPORTED_EXTS = new Set([
   '.jpg', '.jpeg', '.png', '.gif', '.heic', '.raw', '.bmp', '.webp',
@@ -67,6 +67,30 @@ function emitProgress(payload, force = false) {
 // ── Bounded concurrency pool ─────────────────────────────────────────────────
 // Runs `task` over `items` with at most `concurrency` in flight. Bails out early
 // when cancelled. Single-threaded async — no locks needed for shared Maps.
+// ── Perf instrumentation ─────────────────────────────────────────────────────
+// Prints [scan-perf] lines to the terminal. One scan gives a full timing
+// picture: effective pool width, thread pool size, per-phase rate and avg
+// per-op latency — enough to pinpoint any serialization without guessing.
+const perf = { phase: null, t0: 0, ops: 0 };
+function perfPhase(name, plannedOps) {
+  if (perf.phase) perfPhaseEnd();
+  perf.phase = name; perf.t0 = Date.now(); perf.ops = 0;
+  console.log(`[scan-perf] ${name}: start  pool=${CONCURRENCY} UV_THREADPOOL_SIZE=${process.env.UV_THREADPOOL_SIZE || '(unset=4)'} planned=${plannedOps ?? '?'}`);
+}
+function perfTick() {
+  perf.ops++;
+  if (perf.ops % 500 === 0) {
+    const secs = (Date.now() - perf.t0) / 1000;
+    console.log(`[scan-perf] ${perf.phase}: ${perf.ops} ops in ${secs.toFixed(1)}s  (${(perf.ops/secs).toFixed(1)}/s, avg ${(secs*1000/perf.ops).toFixed(1)}ms/op incl. queueing)`);
+  }
+}
+function perfPhaseEnd() {
+  if (!perf.phase) return;
+  const secs = Math.max(0.001, (Date.now() - perf.t0) / 1000);
+  console.log(`[scan-perf] ${perf.phase}: DONE  ${perf.ops} ops in ${secs.toFixed(1)}s  (${(perf.ops/secs).toFixed(1)}/s)`);
+  perf.phase = null;
+}
+
 async function runPool(items, concurrency, task) {
   let next = 0;
   const width = Math.min(concurrency, items.length);
@@ -170,6 +194,7 @@ async function walkCollect(dir, filters, exclusions, label, sourceFiles, warning
     if (!shouldIncludeExt(fullPath, filters)) return;
     try {
       const stat = await fsp.stat(fullPath);
+      perfTick();
       if (filters.minSize && filters.minSize > 0 && stat.size < filters.minSize) return;
 
       counter.walked++;
@@ -196,6 +221,7 @@ async function walkCollect(dir, filters, exclusions, label, sourceFiles, warning
 }
 
 async function run() {
+  perfPhase('walk');
   const { mode, protectedFolders, targetFolders, filters, autoMarkRule, exclusions, includeEmpty } = workerData;
 
   const warnings = [];
@@ -243,6 +269,7 @@ async function run() {
 
   const candidateCount = candidateFiles.length;
   emitProgress({ phase: 'hashing', scanned: 0, total: candidateCount, currentPath: firstFolder }, true);
+  perfPhase('boundary-hash', candidateCount);
 
   // boundary hash → file[]
   const byBoundaryHash = new Map();
@@ -255,6 +282,7 @@ async function run() {
       byBoundaryHash.get(bHash).push(file);
 
       counter.hashed++;
+      perfTick();
       emitProgress({ phase: 'hashing', scanned: counter.hashed, total: candidateCount, currentPath: file.path });
     } catch (e) {
       warnings.push({ path: file.path, reason: e.code === 'EBUSY' ? 'File locked' : e.message });
@@ -273,6 +301,7 @@ async function run() {
   let fullHashed = 0;
 
   emitProgress({ phase: 'verifying', scanned: 0, total: fullHashTotal, currentPath: firstFolder }, true);
+  perfPhase('full-hash', fullHashTotal);
 
   const fileMap = new Map(); // fullHash → file[]
 
@@ -281,6 +310,7 @@ async function run() {
     try {
       const hash = await hashFileFull(file.path);
       fullHashed++;
+      perfTick();
       if (!fileMap.has(hash)) fileMap.set(hash, []);
       fileMap.get(hash).push({ ...file });
       emitProgress({ phase: 'verifying', scanned: fullHashed, total: fullHashTotal, currentPath: file.path });
@@ -290,6 +320,7 @@ async function run() {
   });
 
   if (cancelled) { parentPort.postMessage({ type: 'cancelled' }); return; }
+  perfPhaseEnd();
 
   // ── Build duplicate groups (compare / simple modes) ──────────────────────
   const groups = [];
