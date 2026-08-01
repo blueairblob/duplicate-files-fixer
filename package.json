@@ -5,7 +5,7 @@
   "main": "src/main/main.js",
   "scripts": {
     "dev:renderer": "vite",
-    "dev:electron": "cross-env NODE_ENV=development electron .",
+    "dev:electron": "cross-env NODE_ENV=development UV_THREADPOOL_SIZE=64 electron .",
     "dev": "concurrently \"npm run dev:renderer\" \"wait-on http://localhost:5173 && npm run dev:electron\"",
     "build": "vite build && electron-builder",
     "preview": "vite preview"

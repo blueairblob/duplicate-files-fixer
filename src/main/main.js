@@ -1,10 +1,19 @@
-// Node's async fs ops run on libuv's thread pool (default: 4 threads). Over
-// SMB each op blocks a thread for a full network round-trip, silently capping
-// the scan worker's 16-wide pool at 4-way. Must be set before any fs use,
-// and worker_threads share this process-wide pool.
-process.env.UV_THREADPOOL_SIZE = process.env.UV_THREADPOOL_SIZE || '64';
-
 const { app, BrowserWindow, ipcMain, dialog, shell, screen } = require('electron');
+
+// UV_THREADPOOL_SIZE must be in the environment BEFORE libuv creates its thread
+// pool; Electron may touch async I/O during startup, so setting it in-process
+// is a race. Dev: the npm script exports it. Packaged: relaunch once with it.
+if (!process.env.UV_THREADPOOL_SIZE) {
+  process.env.UV_THREADPOOL_SIZE = '64';
+  if (app.isPackaged) {
+    app.relaunch();
+    app.exit(0);
+  }
+}
+// Verification: this MUST print 64 in the terminal. If it prints undefined or 4,
+// the variable did not reach the process and the thread pool is capped at 4.
+console.log('[perf] UV_THREADPOOL_SIZE =', process.env.UV_THREADPOOL_SIZE);
+
 const { Worker } = require('worker_threads');
 const path = require('path');
 const fs = require('fs');
