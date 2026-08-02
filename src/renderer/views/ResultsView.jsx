@@ -88,9 +88,23 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
     setConfirmOpen(false);
     setDeleting(true);
     const paths = Array.from(marked);
+    // Verify-on-delete: pair every file with a kept copy from its group so the
+    // main process can full-hash both immediately before deleting. Applies
+    // whenever the scan ran below 'thorough' confidence.
+    const needsVerify = (scanResult.confidence || 'thorough') !== 'thorough';
+    const files = paths.map(p => {
+      const group = groups.find(g => g.files.some(f => f.path === p));
+      let counterpart = null;
+      if (group) {
+        const keepers = group.files.filter(f => !marked.has(f.path));
+        const protectedKeeper = keepers.find(f => f.sourceLabel === 'protected');
+        counterpart = (protectedKeeper || keepers[0])?.path || null;
+      }
+      return { path: p, counterpart };
+    });
     let result;
     if (api) {
-      result = await api.deleteFiles(paths);
+      result = await api.deleteFiles({ files, verify: needsVerify });
     } else {
       await new Promise(r => setTimeout(r, 800));
       result = { deleted: paths, failed: [] };

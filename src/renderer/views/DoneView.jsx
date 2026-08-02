@@ -11,7 +11,7 @@ function formatSize(bytes) {
 
 export default function DoneView({ deleteResult, onScanAgain }) {
   const { scale } = useDPR();
-  const { deleted = [], failed = [], quarantined = [], markedBytes = 0, totalScanned = 0 } = deleteResult || {};
+  const { deleted = [], failed = [], quarantined = [], skipped = [], markedBytes = 0, totalScanned = 0 } = deleteResult || {};
   const [count, setCount] = useState(0);
 
   // Animate the counter
@@ -91,6 +91,27 @@ export default function DoneView({ deleteResult, onScanAgain }) {
           </div>
         ))}
       </div>
+
+      {skipped.length > 0 && (
+        <div style={{
+          background: 'var(--amber-dim)',
+          border: '1px solid var(--amber)',
+          borderRadius: 'var(--radius-sm)',
+          padding: `${scale(12)}px ${scale(18)}px`,
+          fontSize: scale(12), color: 'var(--amber)',
+          maxWidth: 480,
+        }}>
+          <div style={{ fontWeight: 600, marginBottom: scale(6) }}>
+            {skipped.length} file{skipped.length !== 1 ? 's' : ''} skipped — safety check found the contents no longer match, so they were NOT deleted:
+          </div>
+          {skipped.slice(0, 5).map(sk => (
+            <div key={sk.path} style={{ fontFamily: 'var(--font-mono)', fontSize: scale(11), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={`${sk.path} — ${sk.reason}`}>
+              {sk.path}
+            </div>
+          ))}
+          {skipped.length > 5 && <div style={{ marginTop: scale(4) }}>…and {skipped.length - 5} more</div>}
+        </div>
+      )}
 
       {/* Recycle bin / quarantine note */}
       {deleted.length > 0 && quarantined.length === 0 && (

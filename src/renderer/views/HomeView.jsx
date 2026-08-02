@@ -127,6 +127,7 @@ export default function HomeView({ onStartScan, preset = null, exclusionCount = 
   const [minSize, setMinSize] = useState(0);
   const [includeEmpty, setIncludeEmpty] = useState(false);
   const [autoMarkRule, setAutoMarkRule] = useState('protected-wins');
+  const [confidence, setConfidence] = useState('standard');
   const [optionsOpen, setOptionsOpen] = useState(false);
 
   // Seed the form when a history/recents entry is loaded. Keyed so clicking
@@ -159,11 +160,14 @@ export default function HomeView({ onStartScan, preset = null, exclusionCount = 
       filters: { types, minSize },
       autoMarkRule,
       includeEmpty,
+      confidence,
     });
   };
 
   // One-line summary of the collapsed options, so state stays visible
+  const CONFIDENCE_LABELS = { quick: 'quick match', standard: 'standard match', thorough: 'thorough match' };
   const optionsSummary = [
+    CONFIDENCE_LABELS[confidence] || 'standard match',
     types.length === 0 ? 'All file types' : `${types.length} file type${types.length > 1 ? 's' : ''}`,
     SIZE_LABELS[minSize] || 'any size',
     ...(mode === 'compare' ? [RULE_LABELS[autoMarkRule]] : []),
@@ -301,7 +305,8 @@ export default function HomeView({ onStartScan, preset = null, exclusionCount = 
           minSize={minSize} onMinSize={setMinSize}
           includeEmpty={includeEmpty} onIncludeEmpty={setIncludeEmpty}
           autoMarkRule={autoMarkRule} onAutoMarkRule={setAutoMarkRule}
-          onReset={() => { setTypes([]); setMinSize(0); setIncludeEmpty(false); setAutoMarkRule('protected-wins'); }}
+          confidence={confidence} onConfidence={setConfidence}
+          onReset={() => { setTypes([]); setMinSize(0); setIncludeEmpty(false); setAutoMarkRule('protected-wins'); setConfidence('standard'); }}
           onClose={() => setOptionsOpen(false)}
         />
       )}

@@ -28,6 +28,7 @@ const KEEP_RULES = [
 
 export default function ScanOptionsSheet({
   mode, types, onToggleType, minSize, onMinSize,
+  confidence, onConfidence,
   includeEmpty, onIncludeEmpty, autoMarkRule, onAutoMarkRule,
   onReset, onClose,
 }) {
@@ -106,6 +107,50 @@ export default function ScanOptionsSheet({
               </div>
             </>
           )}
+
+          <p style={sectionTitle}>Match confidence</p>
+          <div style={{
+            border: '1px solid var(--border)', borderRadius: 'var(--radius-md)',
+            overflow: 'hidden', marginBottom: scale(20),
+          }}>
+            {[
+              { id: 'quick',    label: 'Quick',    hint: 'Size and name only — fastest, for backup checks' },
+              { id: 'standard', label: 'Standard', hint: 'Content sample; deletions verified first', recommended: true },
+              { id: 'thorough', label: 'Thorough', hint: 'Full byte-for-byte comparison during scan' },
+            ].map(({ id, label, hint, recommended }, i) => {
+              const active = confidence === id;
+              return (
+                <button key={id} onClick={() => onConfidence(id)} style={{
+                  display: 'flex', alignItems: 'center', gap: scale(10), width: '100%',
+                  padding: `${scale(10)}px ${scale(14)}px`, textAlign: 'left',
+                  background: active ? 'var(--accent-tint)' : 'transparent',
+                  borderTop: i > 0 ? '1px solid var(--border)' : 'none',
+                }}>
+                  {active
+                    ? <CheckCircleIcon size={scale(16)} color="var(--accent)" />
+                    : <span style={{
+                        width: scale(16), height: scale(16), borderRadius: '50%',
+                        border: '1.5px solid var(--border-strong)', flexShrink: 0,
+                      }} />}
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    <span style={{
+                      display: 'block', fontSize: 'var(--fs-secondary)',
+                      fontWeight: active ? 500 : 400,
+                      color: active ? 'var(--accent)' : 'var(--text-primary)',
+                    }}>{label}</span>
+                    <span style={{ display: 'block', fontSize: 'var(--fs-caption)', color: active ? 'var(--accent)' : 'var(--text-muted)' }}>
+                      {hint}
+                    </span>
+                  </span>
+                  {recommended && (
+                    <span style={{ fontSize: 'var(--fs-caption)', color: active ? 'var(--accent)' : 'var(--text-muted)', flexShrink: 0 }}>
+                      Recommended
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
 
           <p style={sectionTitle}>File types</p>
           <div style={{ display: 'flex', gap: scale(6), flexWrap: 'wrap', marginBottom: scale(20) }}>

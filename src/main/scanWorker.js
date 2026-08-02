@@ -26,6 +26,62 @@ const { isExcluded } = require('./exclusions');
 // flatten quickly and very high values can starve the event loop.
 const CONCURRENCY = Math.max(1, Number(workerData.concurrency) || 32);
 
+// Match confidence: how much evidence is required to call two files duplicates.
+//   quick    — size + filename only (no content reads)
+//   standard — size + 64KB head hash (boundary phase only)          [default]
+//   thorough — boundary pre-filter, then full byte-for-byte SHA-256
+// Standard/Quick deletions are protected by verify-on-delete in the main
+// process, which full-hash-compares each file against its kept counterpart
+// at deletion time.
+const CONFIDENCE = ['quick', 'standard', 'thorough'].includes(workerData.confidence)
+  ? workerData.confidence : 'standard';
+
+// ── Signature cache ──────────────────────────────────────────────────────────
+// Persists (size, mtime) → boundary/full hashes per path, so unchanged files
+// are never re-read. This makes repeat scans of slow network shares run at
+// walk speed: the NAS's ~15 ops/s ceiling only ever applies to files that are
+// new or modified since the last scan.
+// Validity token is exact size + mtime ISO string; any mismatch → recompute.
+const CACHE_PATH = workerData.cachePath || null;
+let sigCache = { version: 1, entries: {} };
+if (CACHE_PATH) {
+  try {
+    const loaded = JSON.parse(fs.readFileSync(CACHE_PATH, 'utf8'));
+    if (loaded && loaded.version === 1 && loaded.entries) sigCache = loaded;
+  } catch { /* first run or unreadable — start fresh */ }
+}
+const cacheStats = { bhHits: 0, bhMisses: 0, fhHits: 0, fhMisses: 0 };
+
+function cacheGet(file, kind) {
+  const e = sigCache.entries[file.path];
+  if (e && e.size === file.size && e.m === file.modified && e[kind]) return e[kind];
+  return null;
+}
+function cachePut(file, kind, value) {
+  let e = sigCache.entries[file.path];
+  if (!e || e.size !== file.size || e.m !== file.modified) {
+    e = { size: file.size, m: file.modified };
+    sigCache.entries[file.path] = e;
+  }
+  e[kind] = value;
+}
+function cacheSave() {
+  if (!CACHE_PATH) return;
+  try {
+    const paths = Object.keys(sigCache.entries);
+    const MAX_ENTRIES = 500000;
+    if (paths.length > MAX_ENTRIES) {
+      for (const p of paths.slice(0, paths.length - MAX_ENTRIES)) delete sigCache.entries[p];
+    }
+    const tmp = CACHE_PATH + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(sigCache));
+    fs.renameSync(tmp, CACHE_PATH);
+    console.log(`[scan-perf] cache: saved ${Object.keys(sigCache.entries).length} entries  (boundary ${cacheStats.bhHits} hits / ${cacheStats.bhMisses} misses, full ${cacheStats.fhHits} hits / ${cacheStats.fhMisses} misses)`);
+  } catch (e) {
+    console.log('[scan-perf] cache: save failed —', e.message);
+  }
+}
+
 const SUPPORTED_EXTS = new Set([
   '.jpg', '.jpeg', '.png', '.gif', '.heic', '.raw', '.bmp', '.webp',
   '.mp3', '.aac', '.flac', '.wav', '.ogg', '.m4a',
@@ -91,6 +147,35 @@ function perfPhaseEnd() {
   perf.phase = null;
 }
 
+// Per-root concurrency limiter: a spinning-disk NAS served 31 concurrent
+// random reads with multi-second FIFO latencies; shallow per-root queues keep
+// latency sane while the global pool overlaps roots freely.
+const ROOT_LIMIT = 8;        // small single-read ops (boundary hashing)
+const STREAM_ROOT_LIMIT = 3; // full-file streams: fewer at once = less seek thrash
+const rootGates = new Map();
+function rootOf(p) {
+  const drive = /^[A-Za-z]:/.exec(p);
+  if (drive) return drive[0].toUpperCase();
+  const unc = /^\\\\[^\\]+\\[^\\]+/.exec(p);
+  return unc ? unc[0].toLowerCase() : '?';
+}
+async function withRootLimit(p, fn, limit = ROOT_LIMIT) {
+  const root = rootOf(p);
+  let gate = rootGates.get(root);
+  if (!gate) { gate = { active: 0, waiters: [] }; rootGates.set(root, gate); }
+  while (gate.active >= limit) {
+    await new Promise(resolve => gate.waiters.push(resolve));
+  }
+  gate.active++;
+  try {
+    return await fn();
+  } finally {
+    gate.active--;
+    const next = gate.waiters.shift();
+    if (next) next();
+  }
+}
+
 async function runPool(items, concurrency, task) {
   let next = 0;
   const width = Math.min(concurrency, items.length);
@@ -122,7 +207,9 @@ function shouldIncludeExt(filePath, filters) {
 function hashFileFull(filePath) {
   return new Promise((resolve, reject) => {
     const hash   = crypto.createHash('sha256');
-    const stream = fs.createReadStream(filePath);
+    // 1MB chunks: SMB round-trips per file drop ~15x vs the 64KB default,
+    // which dominates full-read throughput on high-latency shares.
+    const stream = fs.createReadStream(filePath, { highWaterMark: 1024 * 1024 });
     stream.on('data', d => hash.update(d));
     stream.on('end',  ()  => resolve(hash.digest('hex')));
     stream.on('error', reject);
@@ -133,32 +220,58 @@ function hashFileFull(filePath) {
 // For files <= 2×BOUNDARY_BYTES we read the whole thing (still cheap).
 // Fully async (fsp) so a slow read never blocks the worker's message loop.
 // Returns a hex string prefixed with "B:" so it can never collide with full hashes.
+let bhOps = 0;        // completed boundary ops
+let bhInFlight = 0;   // concurrent boundary ops gauge
+
+function bhLog(filePath, fileSize, stages, totalMs) {
+  const side = filePath.length >= 2 && filePath[1] === ':' ? filePath.slice(0, 2) : '?';
+  const parts = Object.entries(stages).map(([k, v]) => `${k}=${v.toFixed(0)}ms`).join(' ');
+  console.log(`[bh-perf] #${bhOps} ${side} inflight=${bhInFlight} total=${totalMs.toFixed(0)}ms ${parts} size=${(fileSize/1024).toFixed(0)}KB ${path.basename(filePath)}`);
+}
+
 async function hashFileBoundary(filePath, fileSize) {
   const hash = crypto.createHash('sha256');
+  const stages = {};
+  const t0 = performance.now();
+  let mark = t0;
+  const lap = (name) => { const now = performance.now(); stages[name] = now - mark; mark = now; };
+  bhInFlight++;
 
-  if (fileSize <= BOUNDARY_BYTES * 2) {
-    // Small file — full read is fine and avoids two seeks.
-    await new Promise((resolve, reject) => {
-      const stream = fs.createReadStream(filePath);
-      stream.on('data',  d  => hash.update(d));
-      stream.on('end',   resolve);
-      stream.on('error', reject);
-    });
-    return 'B:' + hash.digest('hex');
-  }
-
-  // Large file — read head then tail via an async file handle.
-  const fd = await fsp.open(filePath, 'r');
   try {
-    const head = Buffer.alloc(BOUNDARY_BYTES);
-    const tail = Buffer.alloc(BOUNDARY_BYTES);
-    const { bytesRead: nHead } = await fd.read(head, 0, BOUNDARY_BYTES, 0);
-    const { bytesRead: nTail } = await fd.read(tail, 0, BOUNDARY_BYTES, fileSize - BOUNDARY_BYTES);
-    hash.update(head.subarray(0, nHead));
-    hash.update(tail.subarray(0, nTail));
-    return 'B:' + hash.digest('hex');
+    if (fileSize <= BOUNDARY_BYTES * 2) {
+      // Small file — full read is fine and avoids a second dispatch.
+      await new Promise((resolve, reject) => {
+        const stream = fs.createReadStream(filePath);
+        stream.on('data',  d  => hash.update(d));
+        stream.on('end',   resolve);
+        stream.on('error', reject);
+      });
+      lap('stream');
+      return 'H:' + hash.digest('hex');
+    }
+
+    // Large file — HEAD-ONLY on purpose. A tail read is a far-offset random
+    // seek that devastates spinning-disk NAS throughput (measured ~2s/file at
+    // a 32-deep queue). (size, head-64KB) is a safe pre-filter: collisions are
+    // resolved by the full-hash verify phase; differing files are never
+    // falsely excluded.
+    const fd = await fsp.open(filePath, 'r');
+    lap('open');
+    try {
+      const head = Buffer.alloc(BOUNDARY_BYTES);
+      const { bytesRead: nHead } = await fd.read(head, 0, BOUNDARY_BYTES, 0);
+      lap('readHead');
+      hash.update(head.subarray(0, nHead));
+      return 'H:' + hash.digest('hex');
+    } finally {
+      await fd.close();
+      lap('close');
+    }
   } finally {
-    await fd.close();
+    bhInFlight--;
+    bhOps++;
+    const totalMs = performance.now() - t0;
+    if (bhOps <= 25 || totalMs > 250) bhLog(filePath, fileSize, stages, totalMs);
   }
 }
 
@@ -249,7 +362,7 @@ async function run() {
     }
   }
 
-  if (cancelled) { parentPort.postMessage({ type: 'cancelled' }); return; }
+  if (cancelled) { cacheSave(); parentPort.postMessage({ type: 'cancelled' }); return; }
 
   // Separate zero-byte files — grouped by name only, never content-hashed.
   const emptyFiles    = allFiles.filter(f =>  f.isEmpty);
@@ -267,17 +380,44 @@ async function run() {
     if (group.length >= 2) candidateFiles.push(...group);
   }
 
+  // Dedupe by path (files were observed enqueued twice) and sort by path so
+  // reads arrive in directory order — friendly to spinning-disk layouts and
+  // the NAS's read-ahead.
+  const seenPaths = new Set();
+  const dedupedCandidates = candidateFiles.filter(f => {
+    if (seenPaths.has(f.path)) return false;
+    seenPaths.add(f.path);
+    return true;
+  }).sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  candidateFiles.length = 0;
+  candidateFiles.push(...dedupedCandidates);
   const candidateCount = candidateFiles.length;
   emitProgress({ phase: 'hashing', scanned: 0, total: candidateCount, currentPath: firstFolder }, true);
   perfPhase('boundary-hash', candidateCount);
 
-  // boundary hash → file[]
+  // boundary hash → file[]  (or quick-match key → file[] in quick mode)
   const byBoundaryHash = new Map();
 
-  await runPool(candidateFiles, CONCURRENCY, async (file) => {
+  if (CONFIDENCE === 'quick') {
+    // Quick: size + filename, zero content reads.
+    for (const file of candidateFiles) {
+      const key = 'Q:' + file.size + '|' + path.basename(file.path).toLowerCase();
+      if (!byBoundaryHash.has(key)) byBoundaryHash.set(key, []);
+      byBoundaryHash.get(key).push(file);
+    }
+    counter.hashed = candidateCount;
+    emitProgress({ phase: 'hashing', scanned: candidateCount, total: candidateCount, currentPath: firstFolder }, true);
+  } else await runPool(candidateFiles, CONCURRENCY, async (file) => {
     if (cancelled) return;
     try {
-      const bHash = await hashFileBoundary(file.path, file.size);
+      let bHash = cacheGet(file, 'bh');
+      if (bHash) {
+        cacheStats.bhHits++;
+      } else {
+        bHash = await withRootLimit(file.path, () => hashFileBoundary(file.path, file.size));
+        cachePut(file, 'bh', bHash);
+        cacheStats.bhMisses++;
+      }
       if (!byBoundaryHash.has(bHash)) byBoundaryHash.set(bHash, []);
       byBoundaryHash.get(bHash).push(file);
 
@@ -289,12 +429,14 @@ async function run() {
     }
   });
 
-  if (cancelled) { parentPort.postMessage({ type: 'cancelled' }); return; }
+  if (cancelled) { cacheSave(); parentPort.postMessage({ type: 'cancelled' }); return; }
 
   // ── Pass 3: full SHA-256 only for boundary-hash collisions ───────────────
   const fullHashCandidates = [];
-  for (const group of byBoundaryHash.values()) {
-    if (group.length >= 2) fullHashCandidates.push(...group);
+  if (CONFIDENCE === 'thorough') {
+    for (const group of byBoundaryHash.values()) {
+      if (group.length >= 2) fullHashCandidates.push(...group);
+    }
   }
 
   const fullHashTotal = fullHashCandidates.length;
@@ -308,7 +450,14 @@ async function run() {
   await runPool(fullHashCandidates, CONCURRENCY, async (file) => {
     if (cancelled) return;
     try {
-      const hash = await hashFileFull(file.path);
+      let hash = cacheGet(file, 'fh');
+      if (hash) {
+        cacheStats.fhHits++;
+      } else {
+        hash = await withRootLimit(file.path, () => hashFileFull(file.path), STREAM_ROOT_LIMIT);
+        cachePut(file, 'fh', hash);
+        cacheStats.fhMisses++;
+      }
       fullHashed++;
       perfTick();
       if (!fileMap.has(hash)) fileMap.set(hash, []);
@@ -319,8 +468,15 @@ async function run() {
     }
   });
 
-  if (cancelled) { parentPort.postMessage({ type: 'cancelled' }); return; }
+  if (cancelled) { cacheSave(); parentPort.postMessage({ type: 'cancelled' }); return; }
   perfPhaseEnd();
+
+  if (CONFIDENCE !== 'thorough') {
+    // Quick/Standard: the boundary (or quick-key) groups ARE the result set.
+    for (const [key, files] of byBoundaryHash.entries()) {
+      fileMap.set(key, files.map(f => ({ ...f })));
+    }
+  }
 
   // ── Build duplicate groups (compare / simple modes) ──────────────────────
   const groups = [];
@@ -420,6 +576,7 @@ async function run() {
     ? emptyFiles.map(f => ({ ...f }))
     : [];
 
+  cacheSave();
   parentPort.postMessage({
     type: 'done',
     result: {
@@ -429,6 +586,7 @@ async function run() {
       totalHashed: counter.hashed,
       warnings,
       mode,
+      confidence: CONFIDENCE,
       verifyReport,
     },
   });

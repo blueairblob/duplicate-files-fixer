@@ -383,7 +383,10 @@ ipcMain.handle('scan:start', async (event, opts) => {
         autoMarkRule: opts.autoMarkRule,
         exclusions: exclusionList,
         includeEmpty: !!opts.includeEmpty,
+        confidence: opts.confidence, // quick | standard | thorough (worker defaults standard)
         concurrency: opts.concurrency, // undefined → worker defaults to 16
+        // Signature cache: (path, size, mtime) → hashes, reused across scans
+        cachePath: path.join(app.getPath('userData'), 'dff-signature-cache.json'),
       },
     });
     activeWorker = worker;
@@ -481,9 +484,64 @@ function quarantineFile(filePath) {
   return destPath;
 }
 
-ipcMain.handle('files:delete', async (event, filePaths) => {
-  const results = { deleted: [], failed: [], quarantined: [] };
-  for (const filePath of filePaths) {
+ipcMain.handle('files:delete', async (event, payload) => {
+  // Accepts either a bare array of paths (legacy, no verification) or
+  // { files: [{ path, counterpart }], verify: bool }. With verify on, each
+  // file is full-hash compared against its kept counterpart immediately
+  // before deletion; a mismatch skips the file. This is what makes Quick /
+  // Standard scan confidence safe: certainty is bought per-deleted-file at
+  // delete time instead of per-scanned-file at scan time.
+  const legacy = Array.isArray(payload);
+  const items = legacy ? payload.map(p => ({ path: p })) : (payload && payload.files) || [];
+  const verify = !legacy && !!(payload && payload.verify);
+  const results = { deleted: [], failed: [], quarantined: [], skipped: [] };
+
+  let sigCache = null;
+  const loadSigCache = () => {
+    if (sigCache) return sigCache;
+    try {
+      sigCache = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'dff-signature-cache.json'), 'utf8'));
+    } catch { sigCache = { entries: {} }; }
+    return sigCache;
+  };
+  const fullHash = (p) => new Promise((resolve, reject) => {
+    const h = crypto.createHash('sha256');
+    const st = fs.createReadStream(p, { highWaterMark: 1024 * 1024 });
+    st.on('data', d => h.update(d));
+    st.on('end', () => resolve(h.digest('hex')));
+    st.on('error', reject);
+  });
+  // Reuse the scan's signature cache when (size, mtime) still match — most
+  // verifications then cost zero reads.
+  const hashOf = async (p) => {
+    try {
+      const st = fs.statSync(p);
+      const e = loadSigCache().entries && loadSigCache().entries[p];
+      if (e && e.size === st.size && e.m === st.mtime.toISOString() && e.fh) return e.fh;
+    } catch { /* fall through to reading */ }
+    return fullHash(p);
+  };
+
+  for (const item of items) {
+    const filePath = item.path;
+
+    if (verify) {
+      if (!item.counterpart) {
+        results.skipped.push({ path: filePath, reason: 'No kept copy to verify against — not deleted' });
+        continue;
+      }
+      try {
+        const [a, b] = await Promise.all([hashOf(filePath), hashOf(item.counterpart)]);
+        if (a !== b) {
+          results.skipped.push({ path: filePath, reason: 'Contents no longer match the kept copy — not deleted' });
+          continue;
+        }
+      } catch (e) {
+        results.skipped.push({ path: filePath, reason: `Could not verify: ${e.message}` });
+        continue;
+      }
+    }
+
     // 1. Try the OS trash first (works reliably on Windows/macOS, often fails on Linux/WSL)
     try {
       await shell.trashItem(filePath);
