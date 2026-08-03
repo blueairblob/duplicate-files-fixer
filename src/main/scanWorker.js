@@ -373,16 +373,22 @@ function buildCensus(allFiles, fileMap, protectedFolders, targetFolders) {
 
   // Folder rollup over TARGET files only — source folders carry no decision.
   const folderMap = new Map();
+  let pathBudget = 200000;   // cap so a million-file scan can't blow the payload
   for (const f of tgtFiles) {
     const rel = path.relative(f.root || '', path.dirname(f.path)) || '.';
     if (!folderMap.has(rel)) {
-      folderMap.set(rel, { path: rel, root: f.root, files: 0, matched: 0, targetOnly: 0, bytes: 0, reclaimable: 0 });
+      folderMap.set(rel, { path: rel, root: f.root, files: 0, matched: 0, targetOnly: 0, bytes: 0, reclaimable: 0, matchedPaths: [], truncated: false });
     }
     const e = folderMap.get(rel);
     e.files++;
     e.bytes += f.size || 0;
     const g = groupOf.get(f.path);
-    if (g && g.some(x => x.sourceLabel === 'protected')) { e.matched++; e.reclaimable += f.size || 0; }
+    if (g && g.some(x => x.sourceLabel === 'protected')) {
+      e.matched++;
+      e.reclaimable += f.size || 0;
+      if (pathBudget > 0) { e.matchedPaths.push(f.path); pathBudget--; }
+      else e.truncated = true;
+    }
     else e.targetOnly++;
   }
   const folders = Array.from(folderMap.values()).map(e => ({

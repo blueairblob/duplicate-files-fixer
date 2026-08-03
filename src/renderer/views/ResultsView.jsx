@@ -28,14 +28,24 @@ function typeIconFor(ext) {
 
 const CONFIDENCE_LABELS = { quick: 'Quick match', standard: 'Standard match', thorough: 'Thorough match' };
 
-export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, onBack }) {
+export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, onBack, selection = null }) {
   const { scale } = useDPR();
-  const { groups = [], totalScanned = 0, mode, warnings = [], confidence = 'thorough' } = scanResult;
+  const { groups: allGroups = [], totalScanned = 0, mode, warnings = [], confidence = 'thorough' } = scanResult;
+
+  // A selection arriving from the Compare screen scopes this view to the chosen
+  // folders and pre-marks exactly those files — the delete path itself is
+  // unchanged, so verification and recycle-bin routing behave identically.
+  const selSet = useMemo(() => (selection && selection.length ? new Set(selection) : null), [selection]);
+  const groups = useMemo(
+    () => (selSet ? allGroups.filter(g => g.files.some(f => selSet.has(f.path))) : allGroups),
+    [allGroups, selSet]
+  );
 
   // Wording honesty: only a thorough scan has byte-for-byte proven identity.
   const matchWord = confidence === 'thorough' ? 'identical' : 'matching';
 
   const [marked, setMarked] = useState(() => {
+    if (selSet) return new Set(selSet);
     const init = new Set();
     groups.forEach(g => (g.autoMarked || []).forEach(p => init.add(p)));
     return init;

@@ -59,7 +59,7 @@ export default function Sidebar({ section, onSelectSection, onSelectRecent, rece
           <span style={{ flex: 1 }}>
             {scanActivity.status === 'running'
               ? (scanActivity.pct != null ? `Scanning · ${scanActivity.pct}%` : 'Scanning…')
-              : 'Results ready'}
+              : 'Comparison ready'}
           </span>
           {scanActivity.status === 'complete' && scanActivity.groups != null && (
             <span style={{

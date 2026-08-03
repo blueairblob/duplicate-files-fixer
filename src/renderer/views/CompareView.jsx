@@ -18,6 +18,7 @@ function lastSegment(p) {
 }
 
 export default function CompareView({ scanResult, scanConfig, onReviewFiles, onBack }) {
+  const [selFolders, setSelFolders] = useState(() => new Set());
   const { scale } = useDPR();
   const [openList, setOpenList] = useState(null);   // 'sourceOnly' | 'targetOnly' | null
   const [foldersOpen, setFoldersOpen] = useState(false);
@@ -30,6 +31,26 @@ export default function CompareView({ scanResult, scanConfig, onReviewFiles, onB
   const partial = useMemo(() => folders.filter(f => f.state === 'partial'), [folders]);
   const fullyDup = useMemo(() => folders.filter(f => f.state === 'all'), [folders]);
   const noneDup  = useMemo(() => folders.filter(f => f.state === 'none'), [folders]);
+
+  const selectableFolders = useMemo(
+    () => (census?.folders || []).filter(f => f.matched > 0),
+    [census]
+  );
+  const toggleFolder = (key) => setSelFolders(prev => {
+    const next = new Set(prev);
+    next.has(key) ? next.delete(key) : next.add(key);
+    return next;
+  });
+  const selectedFolderObjs = useMemo(
+    () => selectableFolders.filter(f => selFolders.has(f.path)),
+    [selectableFolders, selFolders]
+  );
+  const selectedPaths = useMemo(
+    () => selectedFolderObjs.flatMap(f => f.matchedPaths || []),
+    [selectedFolderObjs]
+  );
+  const selectedBytes = selectedFolderObjs.reduce((a, f) => a + (f.reclaimable || 0), 0);
+  const anyTruncated  = selectedFolderObjs.some(f => f.truncated);
 
   if (!census) {
     return (
@@ -64,6 +85,16 @@ export default function CompareView({ scanResult, scanConfig, onReviewFiles, onB
     path:    { flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', direction: 'rtl', textAlign: 'left', color: 'var(--text-secondary)' },
     note:    { fontSize: scale(12), color: 'var(--text-secondary)', lineHeight: 1.5 },
   };
+
+  const Check = ({ on, onToggle, label }) => (
+    <button aria-label={label} onClick={onToggle}
+      style={{ width: scale(17), height: scale(17), flexShrink: 0, borderRadius: scale(4),
+        border: on ? 'none' : '1px solid var(--border-strong, var(--border))',
+        background: on ? 'var(--accent)' : 'transparent', cursor: 'pointer', padding: 0,
+        display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      {on && <span style={{ color: '#fff', fontSize: scale(11), lineHeight: 1 }}>✓</span>}
+    </button>
+  );
 
   const Tile = ({ num, color, label, sub, onClick, disabled }) => (
     <button style={{ ...s.tile, opacity: disabled ? 0.55 : 1, cursor: disabled ? 'default' : 'pointer' }}
@@ -109,26 +140,22 @@ export default function CompareView({ scanResult, scanConfig, onReviewFiles, onB
       </div>
 
       <div style={s.bar}>
-        <div style={{ ...s.seg, width: pct(census.sourceOnly.files), background: 'var(--accent-tint)', color: 'var(--accent)' }}>
-          {census.sourceOnly.files > 0 ? census.sourceOnly.files.toLocaleString() : ''}
-        </div>
-        <div style={{ ...s.seg, width: pct(census.matched.targetFiles), background: 'var(--success-tint, var(--accent-tint))', color: 'var(--success, var(--accent))', fontSize: scale(14) }}>
+        <div style={{ ...s.seg, width: pct(census.sourceOnly.files), background: 'color-mix(in srgb, var(--accent) 26%, transparent)' }} />
+        <div style={{ ...s.seg, width: pct(census.matched.targetFiles), background: 'color-mix(in srgb, var(--success) 30%, transparent)', color: 'var(--text-primary)', fontSize: scale(14) }}>
           {census.matched.targetFiles.toLocaleString()} in both
         </div>
-        <div style={{ ...s.seg, width: pct(census.targetOnly.files), background: 'var(--warning-tint, var(--border))', color: 'var(--warning, var(--text-secondary))' }}>
-          {census.targetOnly.files > 0 ? census.targetOnly.files.toLocaleString() : ''}
-        </div>
+        <div style={{ ...s.seg, width: pct(census.targetOnly.files), background: 'color-mix(in srgb, var(--warning) 34%, transparent)' }} />
       </div>
       <div style={s.barLbl}>
-        <span>Only in source</span>
-        <span>Only in target</span>
+        <span>{census.sourceOnly.files.toLocaleString()} only in source</span>
+        <span>{census.targetOnly.files.toLocaleString()} only in target</span>
       </div>
 
       <div style={s.tiles}>
         <Tile num={census.matched.targetFiles} color="var(--success, var(--accent))"
           label="Duplicates in target"
           sub={`${formatSize(census.matched.bytes)} · safe to remove`}
-          onClick={onReviewFiles} />
+          onClick={() => onReviewFiles(null)} />
         <Tile num={census.targetOnly.files} color="var(--warning, var(--text-primary))"
           label="Only in target"
           sub={isQuick ? 'needs a standard scan' : `${formatSize(census.targetOnly.bytes)} · not backed up`}
@@ -136,7 +163,7 @@ export default function CompareView({ scanResult, scanConfig, onReviewFiles, onB
           onClick={() => setOpenList(openList === 'targetOnly' ? null : 'targetOnly')} />
         <Tile num={census.sourceOnly.files} color="var(--accent)"
           label="Only in source"
-          sub={`${formatSize(census.sourceOnly.bytes)} · missing here`}
+          sub={`${formatSize(census.sourceOnly.bytes)} · not in the target`}
           onClick={() => setOpenList(openList === 'sourceOnly' ? null : 'sourceOnly')} />
       </div>
 
@@ -164,6 +191,7 @@ export default function CompareView({ scanResult, scanConfig, onReviewFiles, onB
       <div style={s.card}>
         {partial.map((f, i) => (
           <div key={'p' + i} style={s.row}>
+            <Check on={selFolders.has(f.path)} onToggle={() => toggleFolder(f.path)} label={`Select ${f.path}`} />
             <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lastSegment(f.path)}</span>
             <span style={{ fontSize: scale(12), color: 'var(--warning, var(--text-primary))', flexShrink: 0 }}>
               {f.matched} of {f.files} duplicated
@@ -176,16 +204,28 @@ export default function CompareView({ scanResult, scanConfig, onReviewFiles, onB
 
         {fullyDup.length > 0 && (
           <>
-            <button onClick={() => setFoldersOpen(v => !v)}
-              style={{ ...s.row, width: '100%', background: 'none', border: 'none', borderBottom: foldersOpen ? '1px solid var(--border)' : 'none', font: 'inherit', color: 'inherit', cursor: 'pointer', textAlign: 'left' }}>
-              {foldersOpen ? <ChevronDownIcon size={scale(14)} /> : <ChevronRightIcon size={scale(14)} />}
-              <span style={{ flex: 1 }}>{fullyDup.length.toLocaleString()} folders fully duplicated</span>
+            <div style={{ ...s.row, borderBottom: foldersOpen ? '1px solid var(--border)' : 'none' }}>
+              <Check
+                on={fullyDup.length > 0 && fullyDup.every(f => selFolders.has(f.path))}
+                onToggle={() => setSelFolders(prev => {
+                  const next = new Set(prev);
+                  const allOn = fullyDup.every(f => next.has(f.path));
+                  fullyDup.forEach(f => (allOn ? next.delete(f.path) : next.add(f.path)));
+                  return next;
+                })}
+                label="Select all fully duplicated folders" />
+              <button onClick={() => setFoldersOpen(v => !v)}
+                style={{ display: 'flex', alignItems: 'center', gap: scale(10), flex: 1, background: 'none', border: 'none', font: 'inherit', color: 'inherit', cursor: 'pointer', textAlign: 'left', padding: 0 }}>
+                {foldersOpen ? <ChevronDownIcon size={scale(14)} /> : <ChevronRightIcon size={scale(14)} />}
+                <span style={{ flex: 1 }}>{fullyDup.length.toLocaleString()} folders fully duplicated</span>
+              </button>
               <span style={{ fontSize: scale(12), color: 'var(--text-secondary)' }}>
-                {formatSize(fullyDup.reduce((a, f) => a + f.reclaimable, 0))}
+                {fullyDup.reduce((a, f) => a + f.files, 0).toLocaleString()} files
               </span>
-            </button>
+            </div>
             {foldersOpen && fullyDup.slice(0, 300).map((f, i) => (
               <div key={'a' + i} style={{ ...s.row, paddingLeft: scale(34) }}>
+                <Check on={selFolders.has(f.path)} onToggle={() => toggleFolder(f.path)} label={`Select ${f.path}`} />
                 <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-secondary)' }}>{lastSegment(f.path)}</span>
                 <span style={{ fontSize: scale(12), color: 'var(--text-secondary)' }}>{f.files} files · {formatSize(f.bytes)}</span>
               </div>
@@ -204,12 +244,31 @@ export default function CompareView({ scanResult, scanConfig, onReviewFiles, onB
         )}
       </div>
 
-      <div style={{ display: 'flex', gap: scale(10), alignItems: 'center', marginTop: scale(4) }}>
-        <button onClick={onReviewFiles}
-          style={{ padding: `${scale(9)}px ${scale(16)}px`, borderRadius: scale(8), border: '1px solid var(--border-strong, var(--border))', background: 'var(--bg-card)', color: 'var(--text-primary)', font: 'inherit', fontSize: scale(13), cursor: 'pointer' }}>
-          Review all files
-        </button>
-        <span style={s.note}>{CONFIDENCE_LABELS[confidence]} · {(scanResult.totalScanned || 0).toLocaleString()} files scanned</span>
+      <div style={{ display: 'flex', gap: scale(10), alignItems: 'center', marginTop: scale(4), flexWrap: 'wrap' }}>
+        {selectedPaths.length > 0 ? (
+          <>
+            <button onClick={() => onReviewFiles(selectedPaths)}
+              style={{ padding: `${scale(9)}px ${scale(16)}px`, borderRadius: scale(8), border: 'none', background: 'var(--accent)', color: '#fff', fontFamily: 'inherit', fontSize: scale(13), fontWeight: 500, cursor: 'pointer' }}>
+              Review {selectedPaths.length.toLocaleString()} selected files
+            </button>
+            <button onClick={() => setSelFolders(new Set())}
+              style={{ padding: `${scale(9)}px ${scale(16)}px`, borderRadius: scale(8), border: '1px solid var(--border-strong, var(--border))', background: 'var(--bg-card)', color: 'var(--text-primary)', font: 'inherit', fontSize: scale(13), cursor: 'pointer' }}>
+              Clear
+            </button>
+            <span style={s.note}>
+              {selectedFolderObjs.length.toLocaleString()} {selectedFolderObjs.length === 1 ? 'folder' : 'folders'} · {formatSize(selectedBytes)}
+              {anyTruncated && ' · list truncated, review before deleting'}
+            </span>
+          </>
+        ) : (
+          <>
+            <button onClick={() => onReviewFiles(null)}
+              style={{ padding: `${scale(9)}px ${scale(16)}px`, borderRadius: scale(8), border: '1px solid var(--border-strong, var(--border))', background: 'var(--bg-card)', color: 'var(--text-primary)', font: 'inherit', fontSize: scale(13), cursor: 'pointer' }}>
+              Review all files
+            </button>
+            <span style={s.note}>{CONFIDENCE_LABELS[confidence]} · {(scanResult.totalScanned || 0).toLocaleString()} files scanned · tick folders to act on them directly</span>
+          </>
+        )}
       </div>
     </div>
   );

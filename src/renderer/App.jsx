@@ -31,6 +31,7 @@ const SECTION_TITLES = {
 export default function App() {
   const [view, setView] = useState('home');           // what is displayed
   const [showAllFiles, setShowAllFiles] = useState(false); // Compare summary -> full file list
+  const [fileSelection, setFileSelection] = useState(null); // paths chosen by folder on Compare
   const [section, setSection] = useState('scan');     // which sidebar page when view === 'home'
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [scan, setScan] = useState(null);             // { status, config, progress, startedAt, result? }
@@ -91,6 +92,7 @@ export default function App() {
       progress: { scanned: 0, phase: 'walking', total: 0, currentPath: '' },
     });
     setShowAllFiles(false);
+    setFileSelection(null);
     setView('scanning');
     setSection('scan');
 
@@ -161,6 +163,7 @@ export default function App() {
 
   const handleReset = useCallback(() => {
     setShowAllFiles(false);
+    setFileSelection(null);
     runIdRef.current += 1;
     if (demoTimerRef.current) { clearInterval(demoTimerRef.current); demoTimerRef.current = null; }
     setScan(null);
@@ -198,7 +201,9 @@ export default function App() {
   // ── Derived display state ───────────────────────────────────────────────────
   const inScanFlow = view !== 'home';
   const title = inScanFlow
-    ? { scanning: 'Scanning\u2026', results: 'Results', verify: 'Verify results', done: 'Done' }[view]
+    ? (view === 'results'
+        ? (scan?.result?.census && !showAllFiles ? 'Compare' : 'Duplicate files')
+        : { scanning: 'Scanning\u2026', verify: 'Verify results', done: 'Done' }[view])
     : SECTION_TITLES[section];
 
   const scanActivity = scan ? (
@@ -264,12 +269,13 @@ export default function App() {
           )}
           {view === 'results' && scan?.result && scan.result.census && !showAllFiles && (
             <CompareView scanResult={scan.result} scanConfig={scan.config}
-              onReviewFiles={() => setShowAllFiles(true)} onBack={handleReset} />
+              onReviewFiles={(paths) => { setFileSelection(paths || null); setShowAllFiles(true); }} onBack={handleReset} />
           )}
           {view === 'results' && scan?.result && (!scan.result.census || showAllFiles) && (
             <ResultsView scanResult={scan.result} scanConfig={scan.config}
               onDeleteComplete={handleDeleteComplete}
-              onBack={scan.result.census ? () => setShowAllFiles(false) : handleReset} />
+              selection={fileSelection}
+              onBack={scan.result.census ? () => { setShowAllFiles(false); setFileSelection(null); } : handleReset} />
           )}
           {view === 'verify' && scan?.result && (
             <VerifyResultsView scanResult={scan.result} scanConfig={scan.config} onBack={handleReset} />
