@@ -1,6 +1,6 @@
 import React from 'react';
 import { useDPR } from '../contexts/DPRContext.jsx';
-import { entryTitle, entrySubtitle } from '../utils/scanHistory.js';
+import { entryTitle, entrySubtitle, CONFIDENCE_SHORT } from '../utils/scanHistory.js';
 import { ShieldIcon, TargetIcon, SearchIcon, XIcon, ArrowRightIcon, HistoryIcon } from '../components/icons.jsx';
 
 // History section page. Clicking "Load setup" (or the row) seeds New scan
@@ -64,6 +64,11 @@ export default function HistoryView({ entries, onLoadEntry, onRemoveEntry, onCle
                       {entrySubtitle(e)}{e.status === 'complete' ? ` · ${e.totalScanned.toLocaleString()} files scanned` : ''}
                     </p>
                   </div>
+                  <span style={{
+                    fontSize: 'var(--fs-caption)', color: 'var(--text-secondary)',
+                    background: 'var(--bg-inset)', borderRadius: scale(10),
+                    padding: `0 ${scale(8)}px`, lineHeight: `${scale(18)}px`, flexShrink: 0,
+                  }}>{CONFIDENCE_SHORT[e.confidence] || 'Standard'}</span>
                   <span style={{
                     display: 'inline-flex', alignItems: 'center', gap: scale(4),
                     fontSize: 'var(--fs-caption)', color: 'var(--accent)', flexShrink: 0,

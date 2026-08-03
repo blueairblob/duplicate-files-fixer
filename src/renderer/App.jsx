@@ -172,6 +172,7 @@ export default function App() {
       mode: entry.mode,
       protectedFolders: entry.protectedFolders,
       targetFolders: entry.targetFolders,
+      confidence: entry.confidence,
     });
     setView('home');
     setSection('scan');

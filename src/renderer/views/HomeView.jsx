@@ -123,11 +123,21 @@ export default function HomeView({ onStartScan, preset = null, exclusionCount = 
   const [protectedFolders, setProtectedFolders] = useState([]);
   const [targetFolders, setTargetFolders] = useState([]);
   const [simpleFolders, setSimpleFolders] = useState([]);
-  const [types, setTypes] = useState([]);
-  const [minSize, setMinSize] = useState(0);
-  const [includeEmpty, setIncludeEmpty] = useState(false);
-  const [autoMarkRule, setAutoMarkRule] = useState('protected-wins');
-  const [confidence, setConfidence] = useState('standard');
+  // Scan options persist across sessions
+  const savedOptions = (() => {
+    try { return JSON.parse(localStorage.getItem('dff-scan-options')) || {}; } catch { return {}; }
+  })();
+  const [types, setTypes] = useState(savedOptions.types || []);
+  const [minSize, setMinSize] = useState(savedOptions.minSize || 0);
+  const [includeEmpty, setIncludeEmpty] = useState(!!savedOptions.includeEmpty);
+  const [autoMarkRule, setAutoMarkRule] = useState(savedOptions.autoMarkRule || 'protected-wins');
+  const [confidence, setConfidence] = useState(savedOptions.confidence || 'standard');
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('dff-scan-options', JSON.stringify({ types, minSize, includeEmpty, autoMarkRule, confidence }));
+    } catch { /* non-fatal */ }
+  }, [types, minSize, includeEmpty, autoMarkRule, confidence]);
   const [optionsOpen, setOptionsOpen] = useState(false);
 
   // Seed the form when a history/recents entry is loaded. Keyed so clicking
@@ -135,6 +145,7 @@ export default function HomeView({ onStartScan, preset = null, exclusionCount = 
   useEffect(() => {
     if (!preset) return;
     setMode(preset.mode || 'compare');
+    if (preset.confidence) setConfidence(preset.confidence);
     if (preset.mode === 'simple') {
       setSimpleFolders(preset.targetFolders || []);
     } else {

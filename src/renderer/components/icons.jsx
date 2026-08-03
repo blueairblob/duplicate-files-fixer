@@ -67,3 +67,16 @@ export const ArrowRightIcon = (p) => (
 export const SettingsIcon = (p) => (
   <Icon {...p}><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></Icon>
 );
+
+export const ImageIcon = (p) => (
+  <Icon {...p}><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.5"/><path d="M21 15l-4.5-4.5L9 18"/></Icon>
+);
+export const FilmIcon = (p) => (
+  <Icon {...p}><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 5v14M17 5v14M3 9h4M3 15h4M17 9h4M17 15h4"/></Icon>
+);
+export const MusicIcon = (p) => (
+  <Icon {...p}><circle cx="7" cy="17" r="2.5"/><circle cx="17" cy="15" r="2.5"/><path d="M9.5 17V6l10-2v11"/></Icon>
+);
+export const FileIcon = (p) => (
+  <Icon {...p}><path d="M6 3h8l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z"/><path d="M14 3v5h5"/></Icon>
+);

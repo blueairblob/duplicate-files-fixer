@@ -27,6 +27,7 @@ export function addHistoryEntry(config) {
     mode: config.mode,
     protectedFolders: config.protectedFolders || [],
     targetFolders: config.targetFolders || [],
+    confidence: config.confidence || 'standard',
     status: 'started',        // 'started' | 'complete'
     duplicateGroups: null,
     totalScanned: 0,
@@ -89,3 +90,5 @@ export function entrySubtitle(e) {
   const dupes = e.mode === 'verify' ? MODE_LABELS.verify : `${e.duplicateGroups} dupes`;
   return `${when} \u00b7 ${dupes}`;
 }
+
+export const CONFIDENCE_SHORT = { quick: 'Quick', standard: 'Standard', thorough: 'Thorough' };

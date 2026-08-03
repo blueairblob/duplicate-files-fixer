@@ -1,5 +1,9 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { useDPR } from '../contexts/DPRContext.jsx';
+import {
+  ShieldIcon, SearchIcon, ChevronDownIcon, ChevronRightIcon, CheckCircleIcon,
+  ImageIcon, FilmIcon, MusicIcon, FileIcon, ArchiveIcon,
+} from '../components/icons.jsx';
 
 const api = window.electronAPI;
 
@@ -14,30 +18,28 @@ function formatDate(iso) {
   return new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
-function fileIcon(ext) {
-  const map = {
-    '.jpg':'🖼','.jpeg':'🖼','.png':'🖼','.gif':'🖼','.heic':'🖼','.webp':'🖼','.bmp':'🖼',
-    '.mp3':'🎵','.aac':'🎵','.flac':'🎵','.wav':'🎵','.m4a':'🎵',
-    '.mp4':'🎬','.mov':'🎬','.avi':'🎬','.mkv':'🎬',
-    '.pdf':'📄','.docx':'📝','.xlsx':'📊','.pptx':'📑','.txt':'📃',
-    '.zip':'📦','.rar':'📦','.7z':'📦','.eml':'📧',
-  };
-  return map[ext] || '📄';
+function typeIconFor(ext) {
+  if (['.jpg','.jpeg','.png','.gif','.heic','.webp','.bmp'].includes(ext)) return ImageIcon;
+  if (['.mp4','.mov','.avi','.mkv'].includes(ext)) return FilmIcon;
+  if (['.mp3','.aac','.flac','.wav','.m4a'].includes(ext)) return MusicIcon;
+  if (['.zip','.rar','.7z'].includes(ext)) return ArchiveIcon;
+  return FileIcon;
 }
+
+const CONFIDENCE_LABELS = { quick: 'Quick match', standard: 'Standard match', thorough: 'Thorough match' };
 
 export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, onBack }) {
   const { scale } = useDPR();
-  const { labelStyle, btnPrimary, btnSecondary, btnDanger, btnGhost } = makeStyles(scale);
-  const { groups = [], totalScanned = 0, totalHashed = 0, mode, warnings = [] } = scanResult;
-  const { autoMarkRule } = scanConfig || {};
+  const { groups = [], totalScanned = 0, mode, warnings = [], confidence = 'thorough' } = scanResult;
 
-  // Initialise marked from auto-mark computed in main process
+  // Wording honesty: only a thorough scan has byte-for-byte proven identity.
+  const matchWord = confidence === 'thorough' ? 'identical' : 'matching';
+
   const [marked, setMarked] = useState(() => {
     const init = new Set();
     groups.forEach(g => (g.autoMarked || []).forEach(p => init.add(p)));
     return init;
   });
-
   const [expanded, setExpanded] = useState(() => new Set(groups.map(g => g.id)));
   const [search, setSearch] = useState('');
   const [deleting, setDeleting] = useState(false);
@@ -53,22 +55,18 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
     ));
   }, [groups, search]);
 
-  const totalDupes  = groups.reduce((a, g) => a + g.files.length - 1, 0);
   const markedCount = marked.size;
   const markedBytes = groups.flatMap(g => g.files)
     .filter(f => marked.has(f.path))
     .reduce((a, f) => a + f.size, 0);
 
-  // Groups where every copy has been marked — deleting leaves no surviving copy
-  // at all. Occasionally intended, but the single easiest way to lose real data,
-  // so it must be acknowledged explicitly before the delete proceeds.
   const noSurvivorGroups = useMemo(
     () => groups.filter(g => g.files.length > 0 && g.files.every(f => marked.has(f.path))),
     [groups, marked]
   );
 
   const toggleFile = useCallback((path, isProtected) => {
-    if (isProtected) return; // protected files can never be toggled
+    if (isProtected) return;
     setMarked(prev => {
       const next = new Set(prev);
       next.has(path) ? next.delete(path) : next.add(path);
@@ -81,7 +79,6 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
     groups.forEach(g => (g.autoMarked || []).forEach(p => next.add(p)));
     setMarked(next);
   };
-
   const deselectAll = () => setMarked(new Set());
 
   const handleDelete = async () => {
@@ -91,7 +88,7 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
     // Verify-on-delete: pair every file with a kept copy from its group so the
     // main process can full-hash both immediately before deleting. Applies
     // whenever the scan ran below 'thorough' confidence.
-    const needsVerify = (scanResult.confidence || 'thorough') !== 'thorough';
+    const needsVerify = confidence !== 'thorough';
     const files = paths.map(p => {
       const group = groups.find(g => g.files.some(f => f.path === p));
       let counterpart = null;
@@ -112,118 +109,130 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
     onDeleteComplete({ ...result, markedBytes, totalScanned });
   };
 
+  const btnSecondary = {
+    background: 'var(--bg-card)', color: 'var(--text-primary)',
+    border: '1px solid var(--border-strong)', borderRadius: 'var(--radius-sm)',
+    padding: `${scale(7)}px ${scale(14)}px`, fontSize: 'var(--fs-secondary)',
+  };
+
+  // ── Empty state ──
   if (groups.length === 0) {
     return (
-      <div style={{ height:'100%', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap: scale(16) }}>
-        <div style={{ fontSize: scale(48) }}>✅</div>
-        <h2 style={{ fontSize: scale(20), fontWeight: 600 }}>No duplicates found</h2>
-        <p style={{ color: 'var(--text-secondary)' }}>Scanned {totalScanned.toLocaleString()} files — everything looks clean.</p>
+      <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: scale(14) }}>
+        <CheckCircleIcon size={scale(44)} color="var(--success)" />
+        <h1 style={{ fontSize: 'var(--fs-title)', fontWeight: 500 }}>No duplicates found</h1>
+        <p style={{ fontSize: 'var(--fs-body)', color: 'var(--text-secondary)' }}>
+          Scanned {totalScanned.toLocaleString()} files — everything looks clean.
+        </p>
         {warnings.length > 0 && (
-          <div style={{
-            background:'var(--amber-dim)', border:'1px solid var(--amber)',
-            borderRadius:'var(--radius-sm)', padding:`${scale(10)}px ${scale(16)}px`, maxWidth: 440,
-          }}>
-            <p style={{ fontSize: scale(12), color: 'var(--amber)', fontWeight: 600 }}>
-              ⚠ {warnings.length} item{warnings.length !== 1 ? 's' : ''} skipped during scan
-            </p>
-          </div>
+          <p style={{ fontSize: 'var(--fs-caption)', color: 'var(--warning)' }}>
+            {warnings.length} item{warnings.length !== 1 ? 's' : ''} could not be read and {warnings.length !== 1 ? 'were' : 'was'} skipped.
+          </p>
         )}
-        <button onClick={onBack} style={btnPrimary}>Scan again</button>
+        <button onClick={onBack} style={{
+          background: 'var(--accent)', color: 'var(--on-accent)', borderRadius: 'var(--radius-sm)',
+          fontWeight: 500, fontSize: 'var(--fs-body)', padding: `${scale(9)}px ${scale(24)}px`, marginTop: scale(8),
+        }}>Scan again</button>
       </div>
     );
   }
 
   return (
-    <div style={{ height:'100%', display:'flex', flexDirection:'column' }}>
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
 
-      {/* ── Top bar ── */}
+      {/* ── Toolbar ── */}
       <div style={{
-        padding: `${scale(12)}px ${scale(20)}px`, background: 'var(--bg-surface)',
+        padding: `${scale(14)}px ${scale(24)}px`,
         borderBottom: '1px solid var(--border)',
         display: 'flex', alignItems: 'center', gap: scale(14), flexShrink: 0,
       }}>
-        <button onClick={onBack} style={{ ...btnGhost, fontSize: scale(18), padding: `0 ${scale(6)}px` }}>←</button>
-        <div>
-          <span style={{ fontSize: scale(14), fontWeight: 600 }}>{groups.length} duplicate groups</span>
-          <span style={{ color: 'var(--text-muted)', fontSize: scale(12), marginLeft: scale(10) }}>
-            {totalDupes} redundant files · {totalScanned.toLocaleString()} scanned
-          </span>
+        <div style={{ minWidth: 0 }}>
+          <h1 style={{ fontSize: 'var(--fs-heading)', fontWeight: 600, margin: 0 }}>
+            {groups.length.toLocaleString()} duplicate group{groups.length !== 1 ? 's' : ''}
+          </h1>
+          <p style={{ fontSize: 'var(--fs-caption)', color: 'var(--text-secondary)', margin: 0 }}>
+            {totalScanned.toLocaleString()} files scanned · {CONFIDENCE_LABELS[confidence] || 'Thorough match'}
+            {confidence !== 'thorough' && ' · deletions verified first'}
+          </p>
         </div>
-        {mode === 'compare' && (
-          <div style={{ display:'flex', gap: scale(10), marginLeft: scale(8) }}>
-            <span style={{ fontSize: scale(11), color:'var(--teal)', background:'var(--teal-dim)', border:'1px solid var(--teal)', borderRadius:4, padding:`${scale(2)}px ${scale(8)}px` }}>
-              🛡 Protected source active
+
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: scale(8) }}>
+          {mode === 'compare' && (
+            <span title="Files in the protected source can never be deleted" style={{
+              display: 'inline-flex', alignItems: 'center', gap: scale(5),
+              fontSize: 'var(--fs-caption)', color: 'var(--accent)',
+              background: 'var(--accent-tint)', borderRadius: scale(12),
+              padding: `${scale(3)}px ${scale(10)}px`,
+            }}>
+              <ShieldIcon size={scale(13)} /> Protected source
             </span>
-            <span style={{ fontSize: scale(11), color:'var(--text-muted)' }}>
-              Rule: <strong style={{ color:'var(--text-secondary)' }}>{autoMarkRule}</strong>
-            </span>
+          )}
+          <div style={{ position: 'relative' }}>
+            <SearchIcon size={scale(14)} color="var(--text-muted)" style={{ position: 'absolute', left: scale(9), top: '50%', transform: 'translateY(-50%)' }} />
+            <input
+              placeholder="Search"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              style={{
+                background: 'var(--bg-inset)', border: '1px solid transparent',
+                borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)',
+                padding: `${scale(6)}px ${scale(10)}px ${scale(6)}px ${scale(28)}px`,
+                fontSize: 'var(--fs-secondary)', width: scale(180),
+              }}
+            />
           </div>
-        )}
-        <div style={{ marginLeft:'auto', display:'flex', gap: scale(8), alignItems:'center' }}>
-          <input
-            placeholder="Search files…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            style={{
-              background:'var(--bg-elevated)', border:'1px solid var(--border)',
-              borderRadius:'var(--radius-sm)', color:'var(--text-primary)',
-              padding:`${scale(6)}px ${scale(12)}px`, fontSize: scale(12), width: 200,
-            }}
-          />
-          <button onClick={autoMarkAll} style={btnSecondary}>Auto-mark</button>
-          <button onClick={deselectAll}  style={btnSecondary}>Deselect all</button>
         </div>
       </div>
 
       {/* ── Body ── */}
-      <div style={{ flex:1, display:'flex', overflow:'hidden' }}>
+      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
 
         {/* Groups */}
-        <div style={{ flex:1, overflowY:'auto', padding:`${scale(14)}px ${scale(20)}px` }}>
+        <div style={{ flex: 1, overflowY: 'auto', padding: `${scale(16)}px ${scale(24)}px` }}>
           {filteredGroups.map(group => {
             const isExpanded = expanded.has(group.id);
             const groupMarked = group.files.filter(f => marked.has(f.path)).length;
+            const TypeIcon = typeIconFor(group.files[0].ext);
 
             return (
               <div key={group.id} style={{
-                background:'var(--bg-surface)', border:'1px solid var(--border)',
-                borderRadius:'var(--radius-md)', marginBottom: scale(8), overflow:'hidden',
+                background: 'var(--bg-card)', border: '1px solid var(--border)',
+                borderRadius: 'var(--radius-md)', marginBottom: scale(10), overflow: 'hidden',
               }}>
                 {/* Group header */}
-                <div
+                <button
                   onClick={() => setExpanded(prev => {
                     const next = new Set(prev);
                     next.has(group.id) ? next.delete(group.id) : next.add(group.id);
                     return next;
                   })}
                   style={{
-                    padding:`${scale(9)}px ${scale(14)}px`, display:'flex', alignItems:'center', gap: scale(10),
-                    cursor:'pointer', background:'var(--bg-elevated)',
+                    width: '100%', textAlign: 'left', background: 'transparent',
+                    padding: `${scale(10)}px ${scale(14)}px`,
+                    display: 'flex', alignItems: 'center', gap: scale(10),
                   }}
                   onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-hover)'}
-                  onMouseLeave={e => e.currentTarget.style.background = 'var(--bg-elevated)'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                 >
-                  <span style={{ fontSize: scale(15) }}>{fileIcon(group.files[0].ext)}</span>
-                  <span style={{ fontFamily:'var(--font-mono)', fontSize: scale(10), color:'var(--text-muted)' }}>
-                    {group.hash.substring(0,8)}
-                  </span>
-                  <span style={{ fontSize: scale(12), color:'var(--text-secondary)' }}>
-                    {group.files.length} identical files · {formatSize(group.files[0].size)} each
-                  </span>
-                  {group.hasProtected && (
-                    <span style={{ fontSize: scale(10), color:'var(--teal)', background:'var(--teal-dim)', border:'1px solid var(--teal)', borderRadius:4, padding:`${scale(1)}px ${scale(6)}px` }}>
-                      🛡 has protected copy
+                  <TypeIcon size={scale(17)} color="var(--text-secondary)" />
+                  <span style={{ minWidth: 0, flex: 1 }}>
+                    <span style={{
+                      display: 'block', fontSize: 'var(--fs-secondary)', fontWeight: 500,
+                      color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}>{group.files[0].name}</span>
+                    <span style={{ display: 'block', fontSize: 'var(--fs-caption)', color: 'var(--text-secondary)' }}>
+                      {group.files.length} {matchWord} copies · {formatSize(group.files[0].size)} each
                     </span>
-                  )}
+                  </span>
                   {groupMarked > 0 && (
-                    <span style={{ fontSize: scale(10), color:'var(--red)', background:'var(--red-dim)', border:'1px solid var(--red)', borderRadius:4, padding:`${scale(1)}px ${scale(6)}px`, marginLeft:'auto', marginRight: scale(6) }}>
-                      {groupMarked} marked
+                    <span style={{ fontSize: 'var(--fs-caption)', color: 'var(--danger)', flexShrink: 0 }}>
+                      {groupMarked} selected
                     </span>
                   )}
-                  <span style={{ color:'var(--text-muted)', fontSize: scale(12), marginLeft: groupMarked > 0 ? 0 : 'auto' }}>
-                    {isExpanded ? '▾' : '▸'}
-                  </span>
-                </div>
+                  {isExpanded
+                    ? <ChevronDownIcon size={scale(14)} color="var(--text-muted)" />
+                    : <ChevronRightIcon size={scale(14)} color="var(--text-muted)" />}
+                </button>
 
                 {/* File rows */}
                 {isExpanded && group.files.map(file => {
@@ -235,62 +244,45 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
                       key={file.path}
                       onClick={() => toggleFile(file.path, isProtected)}
                       style={{
-                        padding:`${scale(8)}px ${scale(14)}px`, display:'flex', alignItems:'center', gap: scale(12),
-                        borderTop:'1px solid var(--border)',
+                        padding: `${scale(8)}px ${scale(14)}px`,
+                        display: 'flex', alignItems: 'center', gap: scale(11),
+                        borderTop: '1px solid var(--border)',
                         cursor: isProtected ? 'default' : 'pointer',
-                        background: isProtected
-                          ? 'var(--teal-dim)'
-                          : isMarked ? 'var(--red-dim)' : 'transparent',
-                        transition:'background 0.1s ease',
                       }}
-                      onMouseEnter={e => { if (!isProtected && !isMarked) e.currentTarget.style.background = 'var(--bg-hover)'; }}
-                      onMouseLeave={e => { if (!isProtected && !isMarked) e.currentTarget.style.background = 'transparent'; }}
+                      onMouseEnter={e => { if (!isProtected) e.currentTarget.style.background = 'var(--bg-hover)'; }}
+                      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                     >
-                      {/* Checkbox / shield */}
                       {isProtected ? (
-                        <div style={{
-                          width: scale(16), height: scale(16), display:'flex', alignItems:'center',
-                          justifyContent:'center', fontSize: scale(13), flexShrink:0,
-                        }}>🛡</div>
+                        <span title="Protected — can never be deleted" style={{ display: 'flex', flexShrink: 0 }}>
+                          <ShieldIcon size={scale(16)} color="var(--accent)" />
+                        </span>
                       ) : (
-                        <div style={{
-                          width: scale(16), height: scale(16), borderRadius:4, flexShrink:0,
-                          border:`1.5px solid ${isMarked ? 'var(--red)' : 'var(--border-light)'}`,
-                          background: isMarked ? 'var(--red)' : 'transparent',
-                          display:'flex', alignItems:'center', justifyContent:'center',
+                        <span style={{
+                          width: scale(16), height: scale(16), borderRadius: scale(4), flexShrink: 0,
+                          border: `1.5px solid ${isMarked ? 'var(--danger)' : 'var(--border-strong)'}`,
+                          background: isMarked ? 'var(--danger)' : 'transparent',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          transition: 'background 0.1s ease, border-color 0.1s ease',
                         }}>
-                          {isMarked && <span style={{ color:'#fff', fontSize: scale(10), lineHeight:1 }}>✓</span>}
-                        </div>
+                          {isMarked && <span style={{ color: '#fff', fontSize: scale(10), lineHeight: 1 }}>✓</span>}
+                        </span>
                       )}
 
-                      <div style={{ flex:1, minWidth:0 }}>
-                        <div style={{
-                          fontSize: scale(12), fontWeight:500,
-                          color: isProtected ? 'var(--teal)' : isMarked ? 'var(--red)' : 'var(--text-primary)',
-                          whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis',
-                        }}>{file.name}</div>
-                        <div style={{
-                          fontSize: scale(10), color:'var(--text-muted)',
-                          fontFamily:'var(--font-mono)',
-                          whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis',
-                        }}>{file.path}</div>
-                      </div>
-
-                      <div style={{ textAlign:'right', flexShrink:0 }}>
-                        <div style={{ fontSize: scale(11), color:'var(--text-secondary)' }}>{formatSize(file.size)}</div>
-                        <div style={{ fontSize: scale(10), color:'var(--text-muted)' }}>{formatDate(file.modified)}</div>
-                      </div>
+                      <span title={file.path} style={{
+                        flex: 1, minWidth: 0, fontSize: 'var(--fs-caption)',
+                        color: isMarked ? 'var(--danger)' : 'var(--text-secondary)',
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                        direction: 'rtl', textAlign: 'left',
+                      }}>{file.path}</span>
 
                       {isProtected && (
-                        <div style={{ background:'var(--teal-dim)', color:'var(--teal)', border:'1px solid var(--teal)', borderRadius:4, padding:`${scale(1)}px ${scale(7)}px`, fontSize: scale(9), fontWeight:600, flexShrink:0 }}>
-                          PROTECTED
-                        </div>
+                        <span style={{ fontSize: 'var(--fs-caption)', color: 'var(--accent)', flexShrink: 0 }}>
+                          Protected
+                        </span>
                       )}
-                      {!isProtected && file.sourceLabel === 'target' && mode === 'compare' && (
-                        <div style={{ background:'var(--red-dim)', color:'var(--red)', border:'1px solid var(--red)', borderRadius:4, padding:`${scale(1)}px ${scale(7)}px`, fontSize: scale(9), fontWeight:600, flexShrink:0 }}>
-                          TARGET
-                        </div>
-                      )}
+                      <span style={{ fontSize: 'var(--fs-caption)', color: 'var(--text-muted)', flexShrink: 0, textAlign: 'right', minWidth: scale(120) }}>
+                        {formatSize(file.size)} · {formatDate(file.modified)}
+                      </span>
                     </div>
                   );
                 })}
@@ -298,39 +290,40 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
             );
           })}
 
-          {/* ── Skipped files warnings panel ── */}
+          {/* Skipped-during-scan warnings */}
           {warnings.length > 0 && (
             <div style={{
-              background: 'var(--bg-surface)', border: '1px solid var(--amber)',
-              borderRadius: 'var(--radius-md)', marginTop: scale(10), overflow: 'hidden',
+              background: 'var(--bg-card)', border: '1px solid var(--border)',
+              borderRadius: 'var(--radius-md)', marginTop: scale(6), overflow: 'hidden',
             }}>
-              <div
+              <button
                 onClick={() => setWarningsOpen(v => !v)}
                 style={{
-                  padding: `${scale(9)}px ${scale(14)}px`, display: 'flex', alignItems: 'center', gap: scale(8),
-                  cursor: 'pointer', background: 'var(--amber-dim)',
+                  width: '100%', textAlign: 'left', background: 'transparent',
+                  padding: `${scale(10)}px ${scale(14)}px`,
+                  display: 'flex', alignItems: 'center', gap: scale(8),
                 }}
               >
-                <span style={{ fontSize: scale(13) }}>⚠</span>
-                <span style={{ fontSize: scale(12), color: 'var(--amber)', fontWeight: 600 }}>
-                  {warnings.length} file{warnings.length !== 1 ? 's' : ''} skipped — click to see why
+                <span style={{ fontSize: 'var(--fs-secondary)', color: 'var(--warning)', flex: 1 }}>
+                  {warnings.length} file{warnings.length !== 1 ? 's' : ''} could not be read during the scan
                 </span>
-                <span style={{ color: 'var(--text-muted)', fontSize: scale(12), marginLeft: 'auto' }}>
-                  {warningsOpen ? '▾' : '▸'}
-                </span>
-              </div>
+                {warningsOpen
+                  ? <ChevronDownIcon size={scale(14)} color="var(--text-muted)" />
+                  : <ChevronRightIcon size={scale(14)} color="var(--text-muted)" />}
+              </button>
               {warningsOpen && (
-                <div style={{ maxHeight: 200, overflowY: 'auto' }}>
+                <div style={{ maxHeight: scale(200), overflowY: 'auto' }}>
                   {warnings.map((w, i) => (
                     <div key={i} style={{
                       padding: `${scale(7)}px ${scale(14)}px`, borderTop: '1px solid var(--border)',
                       display: 'flex', justifyContent: 'space-between', gap: scale(12),
                     }}>
                       <span style={{
-                        fontFamily: 'var(--font-mono)', fontSize: scale(10), color: 'var(--text-secondary)',
-                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1,
+                        fontSize: 'var(--fs-caption)', color: 'var(--text-secondary)',
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                        direction: 'rtl', textAlign: 'left', flex: 1,
                       }}>{w.path}</span>
-                      <span style={{ fontSize: scale(10), color: 'var(--amber)', flexShrink: 0 }}>{w.reason}</span>
+                      <span style={{ fontSize: 'var(--fs-caption)', color: 'var(--warning)', flexShrink: 0 }}>{w.reason}</span>
                     </div>
                   ))}
                 </div>
@@ -341,118 +334,109 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
 
         {/* ── Action panel ── */}
         <div style={{
-          width:210, flexShrink:0, background:'var(--bg-surface)',
-          borderLeft:'1px solid var(--border)', padding: scale(18),
-          display:'flex', flexDirection:'column', gap: scale(16),
+          width: scale(230), flexShrink: 0,
+          borderLeft: '1px solid var(--border)', padding: scale(20),
+          display: 'flex', flexDirection: 'column', gap: scale(16),
         }}>
           <div>
-            <p style={labelStyle}>Selected for deletion</p>
-            <div style={{ fontSize: scale(26), fontWeight:700, color: markedCount > 0 ? 'var(--red)' : 'var(--text-muted)', fontFamily:'var(--font-mono)' }}>
-              {markedCount}
-            </div>
-            <div style={{ fontSize: scale(11), color:'var(--text-muted)' }}>{formatSize(markedBytes)} will be freed</div>
-          </div>
-
-          <div style={{ height:1, background:'var(--border)'}}/>
-
-          <div style={{ display:'flex', flexDirection:'column', gap: scale(7) }}>
-            <button onClick={autoMarkAll} style={{ ...btnSecondary, textAlign:'left', width:'100%' }}>⚡ Auto-mark</button>
-            <button onClick={deselectAll}  style={{ ...btnSecondary, textAlign:'left', width:'100%' }}>☐ Deselect all</button>
-          </div>
-
-          {mode === 'compare' && (
-            <div style={{ background:'var(--teal-dim)', border:'1px solid var(--teal)', borderRadius:'var(--radius-sm)', padding: `${scale(10)}px ${scale(12)}px` }}>
-              <p style={{ fontSize: scale(11), color:'var(--teal)', fontWeight:600, marginBottom: scale(4) }}>🛡 Protected source</p>
-              <p style={{ fontSize: scale(10), color:'var(--text-secondary)', lineHeight:1.5 }}>
-                Files in your protected source are shielded and can never be selected for deletion.
-              </p>
-            </div>
-          )}
-
-          <div style={{ background:'var(--amber-dim)', border:'1px solid var(--amber)', borderRadius:'var(--radius-sm)', padding: `${scale(10)}px ${scale(12)}px` }}>
-            <p style={{ fontSize: scale(11), color:'var(--amber)', fontWeight:600, marginBottom: scale(4) }}>⚠ Safe deletion</p>
-            <p style={{ fontSize: scale(10), color:'var(--text-secondary)', lineHeight:1.5 }}>
-              Files go to the Recycle Bin — recoverable if needed.
+            <p style={{ fontSize: 'var(--fs-caption)', color: 'var(--text-secondary)', margin: 0 }}>Selected for deletion</p>
+            <p style={{
+              fontSize: scale(28), fontWeight: 500, margin: `${scale(2)}px 0 0`,
+              color: markedCount > 0 ? 'var(--danger)' : 'var(--text-muted)',
+              fontVariantNumeric: 'tabular-nums',
+            }}>{markedCount.toLocaleString()}</p>
+            <p style={{ fontSize: 'var(--fs-caption)', color: 'var(--text-secondary)', margin: 0 }}>
+              {formatSize(markedBytes)} will be freed
             </p>
           </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: scale(7) }}>
+            <button onClick={autoMarkAll} style={btnSecondary}>Auto-select duplicates</button>
+            <button onClick={deselectAll} style={btnSecondary}>Deselect all</button>
+          </div>
+
+          <p style={{ fontSize: 'var(--fs-caption)', color: 'var(--text-muted)', lineHeight: 1.5, margin: 0 }}>
+            {mode === 'compare' && 'Protected files can never be deleted. '}
+            Deleted files go to the Recycle Bin{confidence !== 'thorough' && ' and are verified byte-for-byte first'}.
+          </p>
 
           <button
             onClick={() => { if (markedCount > 0) { setAckWipeout(false); setConfirmOpen(true); } }}
             disabled={markedCount === 0 || deleting}
             style={{
-              ...btnDanger, marginTop:'auto',
+              marginTop: 'auto', width: '100%',
+              background: 'var(--danger)', color: '#fff',
+              borderRadius: 'var(--radius-sm)', fontWeight: 500,
+              fontSize: 'var(--fs-body)', padding: `${scale(10)}px ${scale(16)}px`,
               opacity: markedCount === 0 ? 0.4 : 1,
               cursor: markedCount === 0 ? 'not-allowed' : 'pointer',
             }}
           >
-            {deleting ? 'Deleting…' : `Delete ${markedCount} file${markedCount !== 1 ? 's' : ''}`}
+            {deleting ? 'Deleting…' : `Delete ${markedCount.toLocaleString()} file${markedCount !== 1 ? 's' : ''}`}
           </button>
         </div>
       </div>
 
       {/* ── Confirm modal ── */}
       {confirmOpen && (
-        <div style={{
-          position:'fixed', inset:0, background:'rgba(0,0,0,0.65)',
-          backdropFilter:'blur(4px)', display:'flex', alignItems:'center',
-          justifyContent:'center', zIndex:1000,
-        }}>
-          <div style={{
-            background:'var(--bg-elevated)', border:'1px solid var(--border)',
-            borderRadius:'var(--radius-lg)', padding: scale(26), width:360,
+        <div
+          onClick={() => setConfirmOpen(false)}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+          }}
+        >
+          <div onClick={e => e.stopPropagation()} style={{
+            background: 'var(--bg-card)', border: '1px solid var(--border)',
+            borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-sheet)',
+            padding: scale(24), width: scale(400), maxWidth: '90vw',
           }}>
-            <h3 style={{ fontSize: scale(16), fontWeight:600, marginBottom: scale(8) }}>Confirm deletion</h3>
-            <p style={{ fontSize: scale(13), color:'var(--text-secondary)', marginBottom: scale(20) }}>
-              {markedCount} file{markedCount !== 1 ? 's' : ''} ({formatSize(markedBytes)}) will be moved to the Recycle Bin.
+            <h2 style={{ fontSize: 'var(--fs-heading)', fontWeight: 600, marginBottom: scale(6) }}>
+              Delete {markedCount.toLocaleString()} file{markedCount !== 1 ? 's' : ''}?
+            </h2>
+            <p style={{ fontSize: 'var(--fs-secondary)', color: 'var(--text-secondary)', marginBottom: scale(16) }}>
+              {formatSize(markedBytes)} will be moved to the Recycle Bin
+              {confidence !== 'thorough' && ', after verifying each file still matches its kept copy'}.
             </p>
 
             {noSurvivorGroups.length > 0 && (
               <div style={{
-                background:'var(--red-dim)', border:'1px solid var(--red)',
-                borderRadius:'var(--radius-sm)', padding:`${scale(10)}px ${scale(12)}px`,
-                marginBottom: scale(16),
+                background: 'var(--danger-tint)', borderRadius: 'var(--radius-sm)',
+                padding: `${scale(12)}px ${scale(14)}px`, marginBottom: scale(16),
               }}>
-                <p style={{ fontSize: scale(11), color:'var(--red)', fontWeight:700, marginBottom: scale(4) }}>
-                  ⚠ No copy will remain
+                <p style={{ fontSize: 'var(--fs-secondary)', color: 'var(--danger)', fontWeight: 500, marginBottom: scale(4) }}>
+                  No copy will remain
                 </p>
-                <p style={{ fontSize: scale(10), color:'var(--text-secondary)', lineHeight:1.5, marginBottom: scale(8) }}>
-                  {noSurvivorGroups.length} group{noSurvivorGroups.length !== 1 ? 's have' : ' has'} every copy marked — after this
-                  delete there will be no remaining copy of {noSurvivorGroups.length !== 1 ? 'those files' : 'that file'}.
+                <p style={{ fontSize: 'var(--fs-caption)', color: 'var(--text-secondary)', lineHeight: 1.5, marginBottom: scale(10) }}>
+                  {noSurvivorGroups.length} group{noSurvivorGroups.length !== 1 ? 's have' : ' has'} every copy selected —
+                  after this delete there will be no remaining copy of {noSurvivorGroups.length !== 1 ? 'those files' : 'that file'}.
                 </p>
-                <label style={{ display:'flex', alignItems:'center', gap: scale(8), cursor:'pointer' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: scale(8), cursor: 'pointer' }}>
                   <input type="checkbox" checked={ackWipeout} onChange={e => setAckWipeout(e.target.checked)} />
-                  <span style={{ fontSize: scale(10), color:'var(--text-secondary)' }}>
-                    I understand this removes the only remaining copies.
+                  <span style={{ fontSize: 'var(--fs-caption)', color: 'var(--text-primary)' }}>
+                    I understand this removes the only remaining copies
                   </span>
                 </label>
               </div>
             )}
 
-            <div style={{ display:'flex', gap: scale(10), justifyContent:'flex-end' }}>
+            <div style={{ display: 'flex', gap: scale(10), justifyContent: 'flex-end' }}>
               <button onClick={() => setConfirmOpen(false)} style={btnSecondary}>Cancel</button>
               <button
                 onClick={handleDelete}
                 disabled={noSurvivorGroups.length > 0 && !ackWipeout}
                 style={{
-                  ...btnDanger,
+                  background: 'var(--danger)', color: '#fff',
+                  borderRadius: 'var(--radius-sm)', fontWeight: 500,
+                  fontSize: 'var(--fs-secondary)', padding: `${scale(8)}px ${scale(18)}px`,
                   opacity: (noSurvivorGroups.length > 0 && !ackWipeout) ? 0.4 : 1,
                   cursor: (noSurvivorGroups.length > 0 && !ackWipeout) ? 'not-allowed' : 'pointer',
                 }}
-              >Delete marked</button>
+              >Delete</button>
             </div>
           </div>
         </div>
       )}
     </div>
   );
-}
-
-function makeStyles(scale) {
-  return {
-    labelStyle: { fontSize: scale(10), fontWeight: 600, color: 'var(--text-muted)', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: scale(6) },
-    btnPrimary:   { background: 'var(--teal)', color: '#0d0f14', border: 'none', borderRadius: 'var(--radius-sm)', padding: `${scale(8)}px ${scale(18)}px`, fontSize: scale(12), fontWeight: 600, cursor: 'pointer' },
-    btnSecondary: { background: 'var(--bg-elevated)', color: 'var(--text-secondary)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: `${scale(7)}px ${scale(12)}px`, fontSize: scale(11), cursor: 'pointer' },
-    btnDanger:    { background: 'var(--red)', color: '#fff', border: 'none', borderRadius: 'var(--radius-sm)', padding: `${scale(10)}px ${scale(16)}px`, fontSize: scale(12), fontWeight: 600, cursor: 'pointer', width: '100%' },
-    btnGhost:     { background: 'transparent', border: 'none', borderRadius: 'var(--radius-sm)', cursor: 'pointer', color: 'var(--text-muted)' },
-  };
 }
