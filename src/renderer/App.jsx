@@ -275,6 +275,7 @@ export default function App() {
             <ResultsView scanResult={scan.result} scanConfig={scan.config}
               onDeleteComplete={handleDeleteComplete}
               selection={fileSelection}
+              backLabel={scan.result.census ? 'Compare' : null}
               onBack={scan.result.census ? () => { setShowAllFiles(false); setFileSelection(null); } : handleReset} />
           )}
           {view === 'verify' && scan?.result && (

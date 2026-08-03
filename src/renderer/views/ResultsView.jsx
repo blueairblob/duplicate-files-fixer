@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { useDPR } from '../contexts/DPRContext.jsx';
 import {
-  ShieldIcon, SearchIcon, ChevronDownIcon, ChevronRightIcon, CheckCircleIcon,
+  ShieldIcon, SearchIcon, ChevronDownIcon, ChevronRightIcon, ChevronLeftIcon, CheckCircleIcon,
   ImageIcon, FilmIcon, MusicIcon, FileIcon, ArchiveIcon,
 } from '../components/icons.jsx';
 
@@ -28,7 +28,7 @@ function typeIconFor(ext) {
 
 const CONFIDENCE_LABELS = { quick: 'Quick match', standard: 'Standard match', thorough: 'Thorough match' };
 
-export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, onBack, selection = null }) {
+export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, onBack, selection = null, backLabel = null }) {
   const { scale } = useDPR();
   const { groups: allGroups = [], totalScanned = 0, mode, warnings = [], confidence = 'thorough' } = scanResult;
 
@@ -142,7 +142,7 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
         <button onClick={onBack} style={{
           background: 'var(--accent)', color: 'var(--on-accent)', borderRadius: 'var(--radius-sm)',
           fontWeight: 500, fontSize: 'var(--fs-body)', padding: `${scale(9)}px ${scale(24)}px`, marginTop: scale(8),
-        }}>Scan again</button>
+        }}>{backLabel ? `Back to ${backLabel}` : 'Scan again'}</button>
       </div>
     );
   }
@@ -156,12 +156,25 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
         borderBottom: '1px solid var(--border)',
         display: 'flex', alignItems: 'center', gap: scale(14), flexShrink: 0,
       }}>
+        {backLabel && (
+          <button onClick={onBack} title={`Back to ${backLabel}`} style={{
+            display: 'inline-flex', alignItems: 'center', gap: scale(4), flexShrink: 0,
+            background: 'none', border: 'none', cursor: 'pointer', padding: `${scale(5)}px ${scale(8)}px`,
+            marginLeft: scale(-8), borderRadius: scale(6),
+            color: 'var(--accent)', fontFamily: 'inherit', fontSize: 'var(--fs-body)',
+          }}>
+            <ChevronLeftIcon size={scale(16)} /> {backLabel}
+          </button>
+        )}
         <div style={{ minWidth: 0 }}>
           <h1 style={{ fontSize: 'var(--fs-heading)', fontWeight: 600, margin: 0 }}>
             {groups.length.toLocaleString()} duplicate group{groups.length !== 1 ? 's' : ''}
           </h1>
           <p style={{ fontSize: 'var(--fs-caption)', color: 'var(--text-secondary)', margin: 0 }}>
-            {totalScanned.toLocaleString()} files scanned · {CONFIDENCE_LABELS[confidence] || 'Thorough match'}
+            {selSet
+              ? `Showing your selection · ${selSet.size.toLocaleString()} files`
+              : `${totalScanned.toLocaleString()} files scanned`
+            } · {CONFIDENCE_LABELS[confidence] || 'Thorough match'}
             {confidence !== 'thorough' && ' · deletions verified first'}
           </p>
         </div>
