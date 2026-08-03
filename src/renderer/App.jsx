@@ -5,6 +5,7 @@ import ExclusionListPanel from './components/ExclusionListPanel.jsx';
 import HomeView from './views/HomeView.jsx';
 import ScanView from './views/ScanView.jsx';
 import ResultsView from './views/ResultsView.jsx';
+import CompareView from './views/CompareView.jsx';
 import VerifyResultsView from './views/VerifyResultsView.jsx';
 import DoneView from './views/DoneView.jsx';
 import RecoveryView from './views/RecoveryView.jsx';
@@ -29,6 +30,7 @@ const SECTION_TITLES = {
 // just a window onto `scan.progress`.
 export default function App() {
   const [view, setView] = useState('home');           // what is displayed
+  const [showAllFiles, setShowAllFiles] = useState(false); // Compare summary -> full file list
   const [section, setSection] = useState('scan');     // which sidebar page when view === 'home'
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [scan, setScan] = useState(null);             // { status, config, progress, startedAt, result? }
@@ -88,6 +90,7 @@ export default function App() {
       status: 'running', config, startedAt: Date.now(),
       progress: { scanned: 0, phase: 'walking', total: 0, currentPath: '' },
     });
+    setShowAllFiles(false);
     setView('scanning');
     setSection('scan');
 
@@ -157,6 +160,7 @@ export default function App() {
   }, [refreshQuarantineCount]);
 
   const handleReset = useCallback(() => {
+    setShowAllFiles(false);
     runIdRef.current += 1;
     if (demoTimerRef.current) { clearInterval(demoTimerRef.current); demoTimerRef.current = null; }
     setScan(null);
@@ -258,9 +262,14 @@ export default function App() {
               onCancel={handleCancelScan}
             />
           )}
-          {view === 'results' && scan?.result && (
+          {view === 'results' && scan?.result && scan.result.census && !showAllFiles && (
+            <CompareView scanResult={scan.result} scanConfig={scan.config}
+              onReviewFiles={() => setShowAllFiles(true)} onBack={handleReset} />
+          )}
+          {view === 'results' && scan?.result && (!scan.result.census || showAllFiles) && (
             <ResultsView scanResult={scan.result} scanConfig={scan.config}
-              onDeleteComplete={handleDeleteComplete} onBack={handleReset} />
+              onDeleteComplete={handleDeleteComplete}
+              onBack={scan.result.census ? () => setShowAllFiles(false) : handleReset} />
           )}
           {view === 'verify' && scan?.result && (
             <VerifyResultsView scanResult={scan.result} scanConfig={scan.config} onBack={handleReset} />

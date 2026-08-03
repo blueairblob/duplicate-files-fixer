@@ -278,7 +278,8 @@ async function hashFileBoundary(filePath, fileSize) {
 // ── Pass 1: walk + collect candidate files grouped by size ───────────────────
 // Async recursion: readdir per directory, then stat this directory's files
 // through the concurrency pool (the per-file round-trip is the NAS bottleneck).
-async function walkCollect(dir, filters, exclusions, label, sourceFiles, warnings, counter) {
+async function walkCollect(dir, filters, exclusions, label, sourceFiles, warnings, counter, root) {
+  if (root === undefined) root = dir;
   if (cancelled) return;
 
   emitProgress({ phase: 'walking', scanned: counter.walked, currentPath: dir });
@@ -318,6 +319,7 @@ async function walkCollect(dir, filters, exclusions, label, sourceFiles, warning
         modified: stat.mtime.toISOString(),
         ext: path.extname(fullPath).toLowerCase(),
         sourceLabel: label,
+        root,
         isEmpty: stat.size === 0,
       });
       emitProgress({ phase: 'walking', scanned: counter.walked, currentPath: fullPath });
@@ -329,8 +331,92 @@ async function walkCollect(dir, filters, exclusions, label, sourceFiles, warning
   // Then descend into subdirectories.
   for (const sub of subdirs) {
     if (cancelled) return;
-    await walkCollect(sub, filters, exclusions, label, sourceFiles, warnings, counter);
+    await walkCollect(sub, filters, exclusions, label, sourceFiles, warnings, counter, root);
   }
+}
+
+// ── Census: the source-vs-target relationship, independent of duplicate groups ──
+//
+// Matching model is CONTENT-ANYWHERE: a target file counts as "in both" when its
+// content exists somewhere in the protected source, regardless of folder layout.
+// Backup trees rarely mirror the source, so path-parallel matching (FreeFileSync,
+// rsync) would report almost everything as target-only.
+//
+// The sharp edge: one source file can match many target files, so source-only is
+// NOT (sourceTotal - matchedTargetFiles). It must be counted over distinct source
+// files. Getting that wrong ships a summary whose numbers don't reconcile.
+function buildCensus(allFiles, fileMap, protectedFolders, targetFolders) {
+  const groupOf = new Map();               // path → sibling files sharing content
+  for (const files of fileMap.values()) {
+    for (const mf of files) groupOf.set(mf.path, files);
+  }
+
+  const srcFiles = allFiles.filter(f => f.sourceLabel === 'protected');
+  const tgtFiles = allFiles.filter(f => f.sourceLabel === 'target');
+
+  const matchedTarget = [];
+  const targetOnly    = [];
+  for (const f of tgtFiles) {
+    const g = groupOf.get(f.path);
+    (g && g.some(x => x.sourceLabel === 'protected') ? matchedTarget : targetOnly).push(f);
+  }
+
+  const sourceOnly = [];
+  let matchedSourceCount = 0;
+  for (const f of srcFiles) {
+    const g = groupOf.get(f.path);
+    if (g && g.some(x => x.sourceLabel === 'target')) matchedSourceCount++;
+    else sourceOnly.push(f);
+  }
+
+  const sum = arr => arr.reduce((a, f) => a + (f.size || 0), 0);
+
+  // Folder rollup over TARGET files only — source folders carry no decision.
+  const folderMap = new Map();
+  for (const f of tgtFiles) {
+    const rel = path.relative(f.root || '', path.dirname(f.path)) || '.';
+    if (!folderMap.has(rel)) {
+      folderMap.set(rel, { path: rel, root: f.root, files: 0, matched: 0, targetOnly: 0, bytes: 0, reclaimable: 0 });
+    }
+    const e = folderMap.get(rel);
+    e.files++;
+    e.bytes += f.size || 0;
+    const g = groupOf.get(f.path);
+    if (g && g.some(x => x.sourceLabel === 'protected')) { e.matched++; e.reclaimable += f.size || 0; }
+    else e.targetOnly++;
+  }
+  const folders = Array.from(folderMap.values()).map(e => ({
+    ...e,
+    state: e.matched === e.files ? 'all' : e.matched === 0 ? 'none' : 'partial',
+  })).sort((a, b) => b.reclaimable - a.reclaimable);
+
+  const census = {
+    roots: {
+      source: { paths: protectedFolders || [], files: srcFiles.length, bytes: sum(srcFiles) },
+      target: { paths: targetFolders    || [], files: tgtFiles.length, bytes: sum(tgtFiles) },
+    },
+    matched:    { targetFiles: matchedTarget.length, sourceFiles: matchedSourceCount, bytes: sum(matchedTarget) },
+    sourceOnly: { files: sourceOnly.length, bytes: sum(sourceOnly), list: sourceOnly.slice(0, 5000).map(f => ({ path: f.path, size: f.size, modified: f.modified, ext: f.ext })) },
+    targetOnly: { files: targetOnly.length, bytes: sum(targetOnly), list: targetOnly.slice(0, 5000).map(f => ({ path: f.path, size: f.size, modified: f.modified, ext: f.ext })) },
+    folders,
+  };
+
+  // Invariants — log loudly rather than throw, so a bad rollup never kills a scan.
+  const checks = [
+    ['target total',  census.matched.targetFiles + census.targetOnly.files, census.roots.target.files],
+    ['source total',  census.matched.sourceFiles + census.sourceOnly.files, census.roots.source.files],
+    ['folder total',  folders.reduce((a, f) => a + f.files, 0),             census.roots.target.files],
+  ];
+  for (const [name, got, want] of checks) {
+    if (got !== want) console.error(`[census] INVARIANT FAILED ${name}: ${got} !== ${want}`);
+  }
+
+  console.log(`[census] source ${census.roots.source.files} | target ${census.roots.target.files}`);
+  console.log(`[census] in both ${census.matched.targetFiles} target files (${census.matched.sourceFiles} source files) · ${(census.matched.bytes / 1073741824).toFixed(2)} GB reclaimable`);
+  console.log(`[census] source-only ${census.sourceOnly.files} · target-only ${census.targetOnly.files} (backup gap)`);
+  console.log(`[census] folders ${folders.length}  (all=${folders.filter(f => f.state === 'all').length} partial=${folders.filter(f => f.state === 'partial').length} none=${folders.filter(f => f.state === 'none').length})`);
+
+  return census;
 }
 
 async function run() {
@@ -478,6 +564,14 @@ async function run() {
     }
   }
 
+  // ── Census (compare mode only) ────────────────────────────────────────────
+  // Built over non-empty files so it lines up with what was actually hashed;
+  // zero-byte files are reported separately and never content-matched.
+  let census = null;
+  if (mode === 'compare') {
+    census = buildCensus(nonEmptyFiles, fileMap, protectedFolders, targetFolders);
+  }
+
   // ── Build duplicate groups (compare / simple modes) ──────────────────────
   const groups = [];
   let groupId = 0;
@@ -588,6 +682,7 @@ async function run() {
       mode,
       confidence: CONFIDENCE,
       verifyReport,
+      census,
     },
   });
 }
