@@ -32,6 +32,7 @@ export default function App() {
   const [view, setView] = useState('home');           // what is displayed
   const [showAllFiles, setShowAllFiles] = useState(false); // Compare summary -> full file list
   const [fileSelection, setFileSelection] = useState(null); // paths chosen by folder on Compare
+  const [selectionLabel, setSelectionLabel] = useState(null); // what the drill-down is scoped to
   const [section, setSection] = useState('scan');     // which sidebar page when view === 'home'
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [scan, setScan] = useState(null);             // { status, config, progress, startedAt, result? }
@@ -93,6 +94,7 @@ export default function App() {
     });
     setShowAllFiles(false);
     setFileSelection(null);
+    setSelectionLabel(null);
     setView('scanning');
     setSection('scan');
 
@@ -164,6 +166,7 @@ export default function App() {
   const handleReset = useCallback(() => {
     setShowAllFiles(false);
     setFileSelection(null);
+    setSelectionLabel(null);
     runIdRef.current += 1;
     if (demoTimerRef.current) { clearInterval(demoTimerRef.current); demoTimerRef.current = null; }
     setScan(null);
@@ -194,8 +197,13 @@ export default function App() {
 
   const openScanActivity = useCallback(() => {
     if (!scan) return;
-    if (scan.status === 'running') setView('scanning');
-    else setView(scan.result?.mode === 'verify' ? 'verify' : 'results');
+    if (scan.status === 'running') { setView('scanning'); return; }
+    // Always return to the top of the results hierarchy — coming back from
+    // another section into a stale, scoped file list is disorienting.
+    setShowAllFiles(false);
+    setFileSelection(null);
+    setSelectionLabel(null);
+    setView(scan.result?.mode === 'verify' ? 'verify' : 'results');
   }, [scan]);
 
   // ── Derived display state ───────────────────────────────────────────────────
@@ -269,14 +277,15 @@ export default function App() {
           )}
           {view === 'results' && scan?.result && scan.result.census && !showAllFiles && (
             <CompareView scanResult={scan.result} scanConfig={scan.config}
-              onReviewFiles={(paths) => { setFileSelection(paths || null); setShowAllFiles(true); }} onBack={handleReset} />
+              onReviewFiles={(paths, label) => { setFileSelection(paths || null); setSelectionLabel(label || null); setShowAllFiles(true); }} onBack={handleReset} />
           )}
           {view === 'results' && scan?.result && (!scan.result.census || showAllFiles) && (
             <ResultsView scanResult={scan.result} scanConfig={scan.config}
               onDeleteComplete={handleDeleteComplete}
               selection={fileSelection}
+              selectionLabel={selectionLabel}
               backLabel={scan.result.census ? 'Compare' : null}
-              onBack={scan.result.census ? () => { setShowAllFiles(false); setFileSelection(null); } : handleReset} />
+              onBack={scan.result.census ? () => { setShowAllFiles(false); setFileSelection(null); setSelectionLabel(null); } : handleReset} />
           )}
           {view === 'verify' && scan?.result && (
             <VerifyResultsView scanResult={scan.result} scanConfig={scan.config} onBack={handleReset} />

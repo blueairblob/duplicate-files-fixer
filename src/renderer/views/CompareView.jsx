@@ -247,9 +247,11 @@ export default function CompareView({ scanResult, scanConfig, onReviewFiles, onB
       <div style={{ display: 'flex', gap: scale(10), alignItems: 'center', marginTop: scale(4), flexWrap: 'wrap' }}>
         {selectedPaths.length > 0 ? (
           <>
-            <button onClick={() => onReviewFiles(selectedPaths)}
+            <button onClick={() => onReviewFiles(selectedPaths, selectedFolderObjs.length === 1
+              ? lastSegment(selectedFolderObjs[0].path)
+              : `${selectedFolderObjs.length.toLocaleString()} folders`)}
               style={{ padding: `${scale(9)}px ${scale(16)}px`, borderRadius: scale(8), border: 'none', background: 'var(--accent)', color: '#fff', fontFamily: 'inherit', fontSize: scale(13), fontWeight: 500, cursor: 'pointer' }}>
-              Review {selectedPaths.length.toLocaleString()} selected files
+              Review {selectedPaths.length.toLocaleString()} selected file{selectedPaths.length === 1 ? '' : 's'}
             </button>
             <button onClick={() => setSelFolders(new Set())}
               style={{ padding: `${scale(9)}px ${scale(16)}px`, borderRadius: scale(8), border: '1px solid var(--border-strong, var(--border))', background: 'var(--bg-card)', color: 'var(--text-primary)', font: 'inherit', fontSize: scale(13), cursor: 'pointer' }}>

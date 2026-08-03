@@ -28,7 +28,7 @@ function typeIconFor(ext) {
 
 const CONFIDENCE_LABELS = { quick: 'Quick match', standard: 'Standard match', thorough: 'Thorough match' };
 
-export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, onBack, selection = null, backLabel = null }) {
+export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, onBack, selection = null, backLabel = null, selectionLabel = null }) {
   const { scale } = useDPR();
   const { groups: allGroups = [], totalScanned = 0, mode, warnings = [], confidence = 'thorough' } = scanResult;
 
@@ -172,7 +172,7 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
           </h1>
           <p style={{ fontSize: 'var(--fs-caption)', color: 'var(--text-secondary)', margin: 0 }}>
             {selSet
-              ? `Showing your selection · ${selSet.size.toLocaleString()} files`
+              ? `${selectionLabel ? selectionLabel + ' · ' : ''}${selSet.size.toLocaleString()} selected file${selSet.size === 1 ? '' : 's'}`
               : `${totalScanned.toLocaleString()} files scanned`
             } · {CONFIDENCE_LABELS[confidence] || 'Thorough match'}
             {confidence !== 'thorough' && ' · deletions verified first'}
