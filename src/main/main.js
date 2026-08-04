@@ -573,6 +573,28 @@ ipcMain.handle('files:delete', async (event, payload) => {
   return results;
 });
 
+ipcMain.handle('cache:info', async () => {
+  const p = path.join(app.getPath('userData'), 'dff-signature-cache.json');
+  try {
+    const stat = fs.statSync(p);
+    let entries = 0;
+    try { entries = Object.keys(JSON.parse(fs.readFileSync(p, 'utf8')).entries || {}).length; } catch {}
+    return { exists: true, bytes: stat.size, entries };
+  } catch {
+    return { exists: false, bytes: 0, entries: 0 };
+  }
+});
+
+ipcMain.handle('cache:clear', async () => {
+  const p = path.join(app.getPath('userData'), 'dff-signature-cache.json');
+  try {
+    if (fs.existsSync(p)) fs.unlinkSync(p);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
 ipcMain.handle('files:getQuarantineManifest', async () => {
   try {
     return JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf8'));

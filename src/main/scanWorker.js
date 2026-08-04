@@ -76,9 +76,11 @@ function cacheSave() {
     const tmp = CACHE_PATH + '.tmp';
     fs.writeFileSync(tmp, JSON.stringify(sigCache));
     fs.renameSync(tmp, CACHE_PATH);
-    console.log(`[scan-perf] cache: saved ${Object.keys(sigCache.entries).length} entries  (boundary ${cacheStats.bhHits} hits / ${cacheStats.bhMisses} misses, full ${cacheStats.fhHits} hits / ${cacheStats.fhMisses} misses)`);
+    if (PERF_VERBOSE || cacheStats.bhHits || cacheStats.bhMisses || cacheStats.fhHits || cacheStats.fhMisses) {
+      console.log(`[scan] cache: ${Object.keys(sigCache.entries).length.toLocaleString()} entries · boundary ${cacheStats.bhHits}/${cacheStats.bhHits + cacheStats.bhMisses} cached · full ${cacheStats.fhHits}/${cacheStats.fhHits + cacheStats.fhMisses} cached`);
+    }
   } catch (e) {
-    console.log('[scan-perf] cache: save failed —', e.message);
+    console.error('[scan] cache: save failed —', e.message);
   }
 }
 
@@ -127,15 +129,22 @@ function emitProgress(payload, force = false) {
 // Prints [scan-perf] lines to the terminal. One scan gives a full timing
 // picture: effective pool width, thread pool size, per-phase rate and avg
 // per-op latency — enough to pinpoint any serialization without guessing.
-const perf = { phase: null, t0: 0, ops: 0 };
+// Verbose tracing is opt-in: `set DFF_PERF=1` (PowerShell: $env:DFF_PERF=1)
+// before `npm run dev`. It found the NAS boundary-hash bottleneck; leaving it
+// on by default buries real errors under thousands of lines per scan.
+const PERF_VERBOSE = process.env.DFF_PERF === '1';
+
+const perf = { phase: null, t0: 0, ops: 0, phases: [] };
 function perfPhase(name, plannedOps) {
   if (perf.phase) perfPhaseEnd();
   perf.phase = name; perf.t0 = Date.now(); perf.ops = 0;
-  console.log(`[scan-perf] ${name}: start  pool=${CONCURRENCY} UV_THREADPOOL_SIZE=${process.env.UV_THREADPOOL_SIZE || '(unset=4)'} planned=${plannedOps ?? '?'}`);
+  if (PERF_VERBOSE) {
+    console.log(`[scan-perf] ${name}: start  pool=${CONCURRENCY} UV_THREADPOOL_SIZE=${process.env.UV_THREADPOOL_SIZE || '(unset=4)'} planned=${plannedOps ?? '?'}`);
+  }
 }
 function perfTick() {
   perf.ops++;
-  if (perf.ops % 500 === 0) {
+  if (PERF_VERBOSE && perf.ops % 500 === 0) {
     const secs = (Date.now() - perf.t0) / 1000;
     console.log(`[scan-perf] ${perf.phase}: ${perf.ops} ops in ${secs.toFixed(1)}s  (${(perf.ops/secs).toFixed(1)}/s, avg ${(secs*1000/perf.ops).toFixed(1)}ms/op incl. queueing)`);
   }
@@ -143,8 +152,20 @@ function perfTick() {
 function perfPhaseEnd() {
   if (!perf.phase) return;
   const secs = Math.max(0.001, (Date.now() - perf.t0) / 1000);
-  console.log(`[scan-perf] ${perf.phase}: DONE  ${perf.ops} ops in ${secs.toFixed(1)}s  (${(perf.ops/secs).toFixed(1)}/s)`);
+  perf.phases.push({ name: perf.phase, ops: perf.ops, secs });
+  if (PERF_VERBOSE) {
+    console.log(`[scan-perf] ${perf.phase}: DONE  ${perf.ops} ops in ${secs.toFixed(1)}s  (${(perf.ops/secs).toFixed(1)}/s)`);
+  }
   perf.phase = null;
+}
+// One line per scan by default — enough to spot a regression, quiet enough
+// that a warning stands out.
+function perfSummary() {
+  if (perf.phase) perfPhaseEnd();
+  const parts = perf.phases
+    .filter(p => p.ops > 0)
+    .map(p => `${p.name} ${p.ops.toLocaleString()} in ${p.secs.toFixed(1)}s (${Math.round(p.ops / p.secs).toLocaleString()}/s)`);
+  if (parts.length) console.log(`[scan] ${parts.join(' · ')}`);
 }
 
 // Per-root concurrency limiter: a spinning-disk NAS served 31 concurrent
@@ -224,6 +245,7 @@ let bhOps = 0;        // completed boundary ops
 let bhInFlight = 0;   // concurrent boundary ops gauge
 
 function bhLog(filePath, fileSize, stages, totalMs) {
+  if (!PERF_VERBOSE) return;
   const side = filePath.length >= 2 && filePath[1] === ':' ? filePath.slice(0, 2) : '?';
   const parts = Object.entries(stages).map(([k, v]) => `${k}=${v.toFixed(0)}ms`).join(' ');
   console.log(`[bh-perf] #${bhOps} ${side} inflight=${bhInFlight} total=${totalMs.toFixed(0)}ms ${parts} size=${(fileSize/1024).toFixed(0)}KB ${path.basename(filePath)}`);
@@ -417,10 +439,11 @@ function buildCensus(allFiles, fileMap, protectedFolders, targetFolders) {
     if (got !== want) console.error(`[census] INVARIANT FAILED ${name}: ${got} !== ${want}`);
   }
 
-  console.log(`[census] source ${census.roots.source.files} | target ${census.roots.target.files}`);
-  console.log(`[census] in both ${census.matched.targetFiles} target files (${census.matched.sourceFiles} source files) · ${(census.matched.bytes / 1073741824).toFixed(2)} GB reclaimable`);
-  console.log(`[census] source-only ${census.sourceOnly.files} · target-only ${census.targetOnly.files} (backup gap)`);
-  console.log(`[census] folders ${folders.length}  (all=${folders.filter(f => f.state === 'all').length} partial=${folders.filter(f => f.state === 'partial').length} none=${folders.filter(f => f.state === 'none').length})`);
+  console.log(`[census] source ${census.roots.source.files.toLocaleString()} · target ${census.roots.target.files.toLocaleString()} · in both ${census.matched.targetFiles.toLocaleString()} (${(census.matched.bytes / 1073741824).toFixed(2)} GB) · source-only ${census.sourceOnly.files.toLocaleString()} · target-only ${census.targetOnly.files.toLocaleString()}`);
+  if (PERF_VERBOSE) {
+    console.log(`[census] matched source files ${census.matched.sourceFiles.toLocaleString()} (differs from target when one source file covers several copies)`);
+    console.log(`[census] folders ${folders.length}  (all=${folders.filter(f => f.state === 'all').length} partial=${folders.filter(f => f.state === 'partial').length} none=${folders.filter(f => f.state === 'none').length})`);
+  }
 
   return census;
 }
@@ -676,6 +699,7 @@ async function run() {
     ? emptyFiles.map(f => ({ ...f }))
     : [];
 
+  perfSummary();
   cacheSave();
   parentPort.postMessage({
     type: 'done',

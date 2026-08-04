@@ -14,6 +14,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getQuarantineManifest: ()  => ipcRenderer.invoke('files:getQuarantineManifest'),
   restoreFromQuarantine: (quarantinePath) => ipcRenderer.invoke('files:restoreFromQuarantine', quarantinePath),
 
+  getCacheInfo:     ()       => ipcRenderer.invoke('cache:info'),
+  clearCache:       ()       => ipcRenderer.invoke('cache:clear'),
+
   getExclusions:    ()       => ipcRenderer.invoke('exclusions:get'),
   setExclusions:    (list)   => ipcRenderer.invoke('exclusions:set', list),
   resetExclusions:  ()       => ipcRenderer.invoke('exclusions:resetDefaults'),

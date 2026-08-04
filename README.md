@@ -4,8 +4,16 @@ A working Electron + React prototype covering the core features from the PRD (se
 
 - Folder selection (browse, location picker, or drag-and-drop)
 - File type and size filters
-- **Three-pass SHA-256 duplicate detection** — files are grouped by size, then only same-size files get a cheap boundary hash (first + last 64 KB), and only boundary-hash collisions get a full SHA-256. True duplicates are always confirmed by full content hash.
-- **Concurrent worker-thread scanning** — the scan runs off the UI thread using async I/O through a bounded concurrency pool (default 16 in flight). This hides per-file latency on NAS/network drives and keeps the worker responsive, so progress keeps flowing and Cancel takes effect immediately mid-walk.
+- **Compare summary** — a scan lands on a summary of the *relationship* between the two folders, not a wall of file rows: totals for each side, how many files exist in both, what's only in the source, and what's only in the target. Every figure drills down.
+- **Folder-level decisions** — folders that are fully duplicated collapse into a single row you can select in one click; folders that are only *partly* duplicated are surfaced first, because that's where judgement is actually needed. Selecting a partial folder marks only its duplicated files, never the ones that exist nowhere else.
+- **Backup-gap detection** — files present in the target but nowhere in the protected source are reported separately. These are the files that are *not* backed up.
+- **Match confidence** — choose how hard the scan works:
+  - *Quick* — name and size only, no file contents read. Fastest; cannot detect renamed copies.
+  - *Standard* (default) — 64 KB head hash. Good balance; the recommended setting for network drives.
+  - *Thorough* — full SHA-256 of every candidate, byte-for-byte proof of identity.
+- **Verify on delete** — for Quick and Standard scans, each file is hashed and compared against the copy being kept *at the moment of deletion*. Any mismatch is skipped and reported rather than deleted.
+- **Signature cache** — file hashes are remembered between scans (keyed on path, size and mtime), so repeat scans of the same tree run at walk speed. Clearable from Settings.
+- **Concurrent worker-thread scanning** — the scan runs off the UI thread using async I/O through a bounded concurrency pool (default 32 in flight, with a per-drive cap). This hides per-file latency on NAS/network drives and keeps the worker responsive, so progress keeps flowing and Cancel takes effect immediately mid-walk.
 - **Three scan modes:**
   - *Simple* — find duplicates within one or more folders
   - *Compare* — protected source vs. scan target, with shield badges on protected files (never selectable for deletion)
@@ -19,6 +27,31 @@ A working Electron + React prototype covering the core features from the PRD (se
 - Confirm → delete to the **system Recycle Bin**, with a **quarantine fallback**: if the OS trash can't be reached (common on Linux/WSL), files move to an in-app quarantine folder (`~/.dff-quarantine/`) with a recovery manifest instead of being lost
 - **Recovery panel** — browse the in-app quarantine and restore files back to their original location
 - Post-deletion summary screen
+
+---
+
+## Performance on network drives
+
+Scanning a NAS over SMB was the hardest problem in this project, and the fixes are worth knowing about:
+
+- **`UV_THREADPOOL_SIZE` must be set before Electron starts.** Node's default of 4 threads serialises file I/O. The dev script and the packaged build both set it to 64; assigning it in-process is too late to have any effect.
+- **The bottleneck was never SMB.** Benchmarking showed the share scaling from 25 files/s serial to ~2,300/s at concurrency 32. The real cost was a far-offset seek per file on the NAS's spinning disks, which is why the boundary hash reads only the head of a file rather than head *and* tail.
+- **Concurrency is capped per drive**, because queueing 30+ concurrent reads at a single spinning disk increases latency without increasing throughput.
+- **A cold first scan of a large NAS folder is slow** — that's the disk, not the app. The signature cache makes every subsequent scan fast.
+
+### Diagnostics
+
+Verbose per-phase and per-file timings are off by default. To turn them on:
+
+```powershell
+$env:DFF_PERF=1 ; npm run dev     # PowerShell
+```
+
+```bash
+DFF_PERF=1 npm run dev            # bash
+```
+
+Without the flag each scan prints a single summary line plus the comparison census.
 
 ---
 
