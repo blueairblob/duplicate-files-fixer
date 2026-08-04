@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useDPR } from '../contexts/DPRContext.jsx';
-import { ShieldIcon, ChevronRightIcon, ChevronDownIcon } from '../components/icons.jsx';
+import { ShieldIcon, ChevronRightIcon, ChevronDownIcon, CheckCircleIcon, HalfCircleIcon } from '../components/icons.jsx';
 
 function formatSize(bytes) {
   if (!bytes || bytes === 0) return '0 B';
@@ -86,6 +86,15 @@ export default function CompareView({ scanResult, scanConfig, onReviewFiles, onB
     note:    { fontSize: scale(12), color: 'var(--text-secondary)', lineHeight: 1.5 },
   };
 
+  // A tick means "every file in here is already in the protected source".
+  // A half-circle means "some of it isn't". The icon states a fact rather than
+  // decorating the row — if it needs explaining, it has failed.
+  const Mark = ({ full }) => (
+    full
+      ? <CheckCircleIcon size={scale(16)} color="var(--success)" />
+      : <HalfCircleIcon size={scale(16)} color="var(--warning)" />
+  );
+
   const Check = ({ on, onToggle, label }) => (
     <button aria-label={label} onClick={onToggle}
       style={{ width: scale(17), height: scale(17), flexShrink: 0, borderRadius: scale(4),
@@ -152,6 +161,10 @@ export default function CompareView({ scanResult, scanConfig, onReviewFiles, onB
       </div>
 
       <div style={s.tiles}>
+        <Tile num={census.sourceOnly.files} color="var(--accent)"
+          label="Only in source"
+          sub={`${formatSize(census.sourceOnly.bytes)} · not in the target`}
+          onClick={() => setOpenList(openList === 'sourceOnly' ? null : 'sourceOnly')} />
         <Tile num={census.matched.targetFiles} color="var(--success, var(--accent))"
           label="Duplicates in target"
           sub={`${formatSize(census.matched.bytes)} · safe to remove`}
@@ -161,10 +174,6 @@ export default function CompareView({ scanResult, scanConfig, onReviewFiles, onB
           sub={isQuick ? 'needs a standard scan' : `${formatSize(census.targetOnly.bytes)} · not backed up`}
           disabled={isQuick}
           onClick={() => setOpenList(openList === 'targetOnly' ? null : 'targetOnly')} />
-        <Tile num={census.sourceOnly.files} color="var(--accent)"
-          label="Only in source"
-          sub={`${formatSize(census.sourceOnly.bytes)} · not in the target`}
-          onClick={() => setOpenList(openList === 'sourceOnly' ? null : 'sourceOnly')} />
       </div>
 
       {isQuick && (
@@ -187,14 +196,15 @@ export default function CompareView({ scanResult, scanConfig, onReviewFiles, onB
         </>
       )}
 
-      <div style={s.section}>Folders</div>
+      <div style={s.section}>Folders in the target</div>
       <div style={s.card}>
         {partial.map((f, i) => (
           <div key={'p' + i} style={s.row}>
             <Check on={selFolders.has(f.path)} onToggle={() => toggleFolder(f.path)} label={`Select ${f.path}`} />
+            <Mark full={false} />
             <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lastSegment(f.path)}</span>
             <span style={{ fontSize: scale(12), color: 'var(--warning, var(--text-primary))', flexShrink: 0 }}>
-              {f.matched} of {f.files} duplicated
+              {f.targetOnly.toLocaleString()} not in source
             </span>
             <span style={{ fontSize: scale(12), color: 'var(--text-secondary)', flexShrink: 0, minWidth: scale(64), textAlign: 'right' }}>
               {formatSize(f.bytes)}
@@ -214,18 +224,20 @@ export default function CompareView({ scanResult, scanConfig, onReviewFiles, onB
                   return next;
                 })}
                 label="Select all fully duplicated folders" />
+              <Mark full />
               <button onClick={() => setFoldersOpen(v => !v)}
                 style={{ display: 'flex', alignItems: 'center', gap: scale(10), flex: 1, background: 'none', border: 'none', font: 'inherit', color: 'inherit', cursor: 'pointer', textAlign: 'left', padding: 0 }}>
                 {foldersOpen ? <ChevronDownIcon size={scale(14)} /> : <ChevronRightIcon size={scale(14)} />}
                 <span style={{ flex: 1 }}>{fullyDup.length.toLocaleString()} folders fully duplicated</span>
               </button>
               <span style={{ fontSize: scale(12), color: 'var(--text-secondary)' }}>
-                {fullyDup.reduce((a, f) => a + f.files, 0).toLocaleString()} files
+                {fullyDup.reduce((a, f) => a + f.files, 0).toLocaleString()} files, all in source
               </span>
             </div>
             {foldersOpen && fullyDup.slice(0, 300).map((f, i) => (
               <div key={'a' + i} style={{ ...s.row, paddingLeft: scale(34) }}>
                 <Check on={selFolders.has(f.path)} onToggle={() => toggleFolder(f.path)} label={`Select ${f.path}`} />
+                <Mark full />
                 <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-secondary)' }}>{lastSegment(f.path)}</span>
                 <span style={{ fontSize: scale(12), color: 'var(--text-secondary)' }}>{f.files} files · {formatSize(f.bytes)}</span>
               </div>
@@ -241,6 +253,19 @@ export default function CompareView({ scanResult, scanConfig, onReviewFiles, onB
 
         {folders.length === 0 && (
           <div style={{ ...s.row, borderBottom: 'none', color: 'var(--text-secondary)' }}>No target folders scanned.</div>
+        )}
+
+        {folders.length > 0 && (
+          <div style={{ ...s.row, borderBottom: 'none', borderTop: '1px solid var(--border)',
+            background: 'var(--bg-inset, transparent)', color: 'var(--text-secondary)', fontSize: scale(12) }}>
+            <span style={{ flex: 1 }}>
+              {folders.length.toLocaleString()} folders · {census.roots.target.files.toLocaleString()} files in the target
+            </span>
+            <span style={{ color: 'var(--success)' }}>{census.matched.targetFiles.toLocaleString()} in source</span>
+            <span style={{ color: census.targetOnly.files > 0 ? 'var(--warning)' : 'var(--text-secondary)' }}>
+              {census.targetOnly.files.toLocaleString()} not
+            </span>
+          </div>
         )}
       </div>
 

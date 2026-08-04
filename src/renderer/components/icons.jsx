@@ -64,6 +64,14 @@ export const SearchIcon = (p) => (
 export const CheckCircleIcon = (p) => (
   <Icon {...p}><circle cx="12" cy="12" r="9"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/></Icon>
 );
+// Partially complete: outline circle with the left half filled. Reads as
+// "some, not all" without implying an error.
+export const HalfCircleIcon = ({ color = 'currentColor', ...p }) => (
+  <Icon color={color} {...p}>
+    <circle cx="12" cy="12" r="9"/>
+    <path d="M12 3a9 9 0 0 0 0 18Z" fill={color} stroke="none"/>
+  </Icon>
+);
 export const ArrowRightIcon = (p) => (
   <Icon {...p}><path d="M5 12h14M13 6l6 6-6 6"/></Icon>
 );
