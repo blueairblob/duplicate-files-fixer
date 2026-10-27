@@ -272,3 +272,12 @@ These checks need a real Windows desktop and NAS, and can't be automated. Use a 
 6. **Kept copy gone (H2).** Scan, then rename the protected copy, then delete its duplicate. Expected: "The kept copy is missing — not deleted".
 7. **Every copy selected.** Simple scan, select every copy of one group, and delete without ticking the acknowledgement. Expected: the Delete button is disabled. With the acknowledgement ticked, the files go to the Recycle Bin or quarantine, never a permanent delete.
 8. **Local delete.** Delete a duplicate on a local drive. Expected: it appears in the Windows Recycle Bin.
+
+### Phase A — automated NAS run (2026-10-27)
+
+`npx electron tools/phase-a-check.js Z:\ \\192.168.0.101\public` passed all 13 checks against the real share and the Windows Recycle Bin. That covers steps 1–8 above, except the Delete button state in step 7; the guard logic behind that button is covered.
+
+Things learned on the real share:
+- **`shell.trashItem` refuses network files** ("Failed to perform delete operation") and leaves them in place. The old code then tried to rename the file into `C:\Users\…\.dff-quarantine`, which fails across drives, and fell through to `unlinkSync`. **Before Phase A, every NAS delete on Windows was permanent.** This confirms C2.
+- **File identity works on this SMB share.** The mapped `Z:` path and the UNC path report the same `dev:ino`, so the identity dedupe also catches aliases the root check might miss.
+- **The SMB client caches timestamps for about 10 seconds** (`FileInfoCacheLifetime`). A file edited moments before a delete can still show its old mtime. Below Thorough, the content hash catches the edit. In Thorough mode, a same-size edit made in the last ~10 s before deleting the file would not be caught, but the file still goes to quarantine and can be restored. Consider always hashing network files at delete time (Phase C).

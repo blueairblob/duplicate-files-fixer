@@ -18,13 +18,10 @@ const { Worker } = require('worker_threads');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
-const crypto = require('crypto');
 const { DEFAULT_EXCLUSIONS } = require('./exclusions');
-const { analyseRoots } = require('./roots');
-const { buildSession, planDeletion, forgetPaths } = require('./deleteGuard');
-const { executeDeletion, makeIsNetworkPath } = require('./deleteFiles');
-const { quarantineFile, listQuarantine, restoreFile } = require('./quarantine');
-const { execFile } = require('child_process');
+const { buildSession } = require('./deleteGuard');
+const { checkRoots } = require('./system');
+const { createDeleteService } = require('./deleteService');
 
 const isDev = process.env.NODE_ENV === 'development';
 
@@ -370,56 +367,6 @@ ipcMain.handle('exclusions:resetDefaults', async () => {
   return exclusionList;
 });
 
-// ── Network drive mappings (Windows) ─────────────────────────────────────────
-// Z: -> \\nas\share. Used to spot one folder reached through two paths, and to
-// keep network files away from the Recycle Bin (which doesn't cover them).
-let mappingsCache = { at: 0, list: [] };
-function runCapture(cmd, args) {
-  return new Promise((resolve) => {
-    execFile(cmd, args, { encoding: 'utf8', windowsHide: true, timeout: 10000 }, (err, stdout) => resolve(err ? null : stdout));
-  });
-}
-async function getNetworkMappings() {
-  if (process.platform !== 'win32') return [];
-  if (Date.now() - mappingsCache.at < 30000) return mappingsCache.list;
-  let list = [];
-  const ps = await runCapture('powershell', ['-NoProfile', '-Command', 'Get-SmbMapping | Select-Object LocalPath,RemotePath | ConvertTo-Json -Compress']);
-  try {
-    const parsed = ps ? JSON.parse(ps) : null;
-    const arr = Array.isArray(parsed) ? parsed : parsed ? [parsed] : [];
-    list = arr.filter(m => m.LocalPath && m.RemotePath).map(m => ({ local: m.LocalPath, remote: m.RemotePath }));
-  } catch { list = []; }
-  if (list.length === 0) {
-    const out = await runCapture('net', ['use']);
-    for (const line of (out || '').split('\n')) {
-      const m = line.match(/([A-Z]:)\s+(\\\\\S+)/);
-      if (m) list.push({ local: m[1], remote: m[2] });
-    }
-  }
-  mappingsCache = { at: Date.now(), list };
-  return list;
-}
-
-// Resolve symlinks/junctions (and, on Windows, often mapped drives) per root.
-async function resolveRealpaths(paths) {
-  const out = {};
-  for (const p of paths) {
-    try { out[p] = await fs.promises.realpath.native(p); } catch { /* keep as given */ }
-  }
-  return out;
-}
-
-async function checkRoots(opts) {
-  if (!opts || opts.mode === 'simple') return { blocked: [], excludeFromTarget: [] };
-  const protectedRoots = opts.protectedFolders || [];
-  const targetRoots = opts.targetFolders || [];
-  const [mappings, realpaths] = await Promise.all([
-    getNetworkMappings(),
-    resolveRealpaths([...protectedRoots, ...targetRoots]),
-  ]);
-  return analyseRoots({ protectedRoots, targetRoots, platform: process.platform, mappings, realpaths });
-}
-
 ipcMain.handle('scan:checkRoots', async (_event, opts) => checkRoots(opts));
 
 // ── IPC: Scan (worker-thread based) ───────────────────────────────────────────
@@ -508,85 +455,23 @@ ipcMain.handle('scan:cancel', async () => {
 });
 
 // ── IPC: Delete ──────────────────────────────────────────────────────────────
-// The renderer only says WHICH files. The main process decides whether that's
-// allowed (deleteGuard, checked against the last completed scan) and how
-// (deleteFiles: Recycle Bin or same-volume quarantine, never permanent).
-const SIG_CACHE_PATH = () => path.join(app.getPath('userData'), 'dff-signature-cache.json');
-const QUARANTINE_REGISTRY = () => path.join(app.getPath('userData'), 'dff-quarantine-dirs.json');
-const LEGACY_QUARANTINE_DIR = path.join(os.homedir(), '.dff-quarantine');
-
-// Every quarantine folder ever used, so Recovery can list them all.
-async function loadQuarantineDirs() {
-  let dirs = [];
-  try { dirs = JSON.parse(await fs.promises.readFile(QUARANTINE_REGISTRY(), 'utf8')); } catch { /* none yet */ }
-  if (!Array.isArray(dirs)) dirs = [];
-  return Array.from(new Set([LEGACY_QUARANTINE_DIR, ...dirs]));
-}
-async function rememberQuarantineDir(dir) {
-  const dirs = await loadQuarantineDirs();
-  if (dirs.includes(dir)) return;
-  const next = [...dirs.filter(d => d !== LEGACY_QUARANTINE_DIR), dir];
-  const tmp = QUARANTINE_REGISTRY() + '.tmp';
-  await fs.promises.writeFile(tmp, JSON.stringify(next, null, 2));
-  await fs.promises.rename(tmp, QUARANTINE_REGISTRY());
-}
-
-// Same size/mtime/identity format the scan worker records.
-async function statForDelete(p) {
-  const st = await fs.promises.stat(p, { bigint: true });
-  return { size: Number(st.size), modified: st.mtime.toISOString(), id: st.ino !== 0n ? `${st.dev}:${st.ino}` : null };
-}
-
-function hashFull(p) {
-  return new Promise((resolve, reject) => {
-    const h = crypto.createHash('sha256');
-    const st = fs.createReadStream(p, { highWaterMark: 1024 * 1024 });
-    st.on('data', d => h.update(d));
-    st.on('end', () => resolve(h.digest('hex')));
-    st.on('error', reject);
-  });
+// The renderer only says WHICH files. deleteService (guard + executor +
+// quarantine) decides whether that's allowed and how. Never permanent.
+let deleteService = null;
+function getDeleteService() {
+  if (!deleteService) {
+    deleteService = createDeleteService({
+      userDataDir: app.getPath('userData'),
+      homeDir: os.homedir(),
+      trash: (p) => shell.trashItem(p),
+    });
+  }
+  return deleteService;
 }
 
 ipcMain.handle('files:delete', async (event, payload) => {
-  const paths = ((payload && payload.files) || [])
-    .map(f => (typeof f === 'string' ? f : f && f.path))
-    .filter(Boolean);
-  const { items, rejected } = planDeletion(paths, lastSession, { allowNoSurvivor: !!(payload && payload.allowNoSurvivor) });
-
-  // Reuse the scan's signature cache when (size, mtime) still match — most
-  // verifications then cost zero reads.
-  let sigCache = null;
-  const hash = async (p) => {
-    if (!sigCache) {
-      try { sigCache = JSON.parse(await fs.promises.readFile(SIG_CACHE_PATH(), 'utf8')); } catch { sigCache = { entries: {} }; }
-    }
-    try {
-      const s = await statForDelete(p);
-      const e = sigCache.entries && sigCache.entries[p];
-      if (e && e.size === s.size && e.m === s.modified && e.fh) return e.fh;
-    } catch { /* fall through to reading */ }
-    return hashFull(p);
-  };
-
   const win = BrowserWindow.fromWebContents(event.sender);
-  const results = await executeDeletion(items, {
-    stat: statForDelete,
-    hash,
-    trash: (p) => shell.trashItem(p),
-    quarantine: async (p, file) => {
-      const r = await quarantineFile(p, { scanRoot: file.root, homeDir: os.homedir() });
-      try { await rememberQuarantineDir(r.dir); } catch (e) { console.error('[delete] could not record quarantine folder', r.dir, e.message); }
-      return r;
-    },
-    isNetworkPath: makeIsNetworkPath(process.platform, await getNetworkMappings()),
-    verifyContent: !lastSession || lastSession.confidence !== 'thorough',
-    onProgress: (p) => win?.webContents.send('files:deleteProgress', p),
-  });
-
-  forgetPaths(lastSession, [...results.trashed, ...results.quarantined]);
-  results.skipped.unshift(...rejected);
-  results.deleted = [...results.trashed, ...results.quarantined];
-  return results;
+  return getDeleteService().deleteFiles(lastSession, payload, (p) => win?.webContents.send('files:deleteProgress', p));
 });
 
 ipcMain.handle('cache:info', async () => {
@@ -611,10 +496,9 @@ ipcMain.handle('cache:clear', async () => {
   }
 });
 
-ipcMain.handle('files:getQuarantineManifest', async () => listQuarantine(await loadQuarantineDirs()));
+ipcMain.handle('files:getQuarantineManifest', async () => getDeleteService().listQuarantine());
 
-ipcMain.handle('files:restoreFromQuarantine', async (_event, quarantinePath) =>
-  restoreFile(quarantinePath, await loadQuarantineDirs()));
+ipcMain.handle('files:restoreFromQuarantine', async (_event, quarantinePath) => getDeleteService().restore(quarantinePath));
 
 // ── IPC: Window controls ──────────────────────────────────────────────────────
 ipcMain.on('window:minimize', () => BrowserWindow.getFocusedWindow()?.minimize());
