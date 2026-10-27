@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'   # no code signing in CI
+      DFF_RELEASE_DIR: ${{ github.workspace }}/../dff-release
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Unit and integration tests
+        run: npm test
+
+      - name: Build renderer
+        run: npm run build:renderer
+
+      - name: Package (unpacked, no installer)
+        run: npx electron-builder --dir --publish never --config.directories.output="${{ env.DFF_RELEASE_DIR }}"
+        shell: bash
+
+      - name: Smoke test the packaged app (Windows / macOS)
+        if: runner.os != 'Linux'
+        run: node tools/run-smoke.js
+
+      # Linux runners have no display, and the Chromium SUID sandbox helper
+      # isn't set up in an unpacked build: run under xvfb with --no-sandbox
+      # (CI only — the app's own renderer sandbox stays on).
+      - name: Smoke test the packaged app (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum node tools/run-smoke.js -- --no-sandbox
