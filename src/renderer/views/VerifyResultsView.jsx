@@ -37,18 +37,19 @@ export default function VerifyResultsView({ scanResult, scanConfig, onBack }) {
   const report = scanResult?.verifyReport;
 
   const [search, setSearch] = useState('');
-  const [open, setOpen] = useState({ unbacked: true, matched: false, nasOnly: false });
+  const [open, setOpen] = useState({ missing: true, unreadable: true, backedUp: false, backupOnly: false });
+  const confidence = scanResult?.confidence || 'standard';
 
-  // Normalise every bucket to a flat { name, size, path, ext } row shape so the
-  // renderer doesn't have to care that matched items wrap two file records.
+  // The question this screen answers: is every SOURCE file in the BACKUP?
+  // Rows are flattened to { name, size, path, ext }.
   const buckets = useMemo(() => {
-    if (!report) return null;
-    const { matched = [], nasOnly = [], desktopOnly = [] } = report;
+    if (!report || !report.missing) return null;
     const row = f => ({ name: f.name, size: f.size, path: f.path, ext: f.ext });
     return {
-      unbacked: desktopOnly.map(row),                       // on desktop, NOT on NAS — the risk
-      matched:  matched.map(m => row(m.desktopFile || m.nasFile)), // safely backed up
-      nasOnly:  nasOnly.map(row),                           // on NAS only — informational
+      missing:    report.missing.map(row),                  // source files with no copy in the backup — the risk
+      unreadable: report.unreadable.map(row),               // couldn't be read — unknown
+      backedUp:   report.backedUp.map(m => row(m.source)),  // source files that have a copy
+      backupOnly: report.backupOnly.map(row),               // backup files not in the source — informational
     };
   }, [report]);
 
@@ -57,11 +58,7 @@ export default function VerifyResultsView({ scanResult, scanConfig, onBack }) {
     const q = search.trim().toLowerCase();
     if (!q) return buckets;
     const match = r => r.name.toLowerCase().includes(q) || r.path.toLowerCase().includes(q);
-    return {
-      unbacked: buckets.unbacked.filter(match),
-      matched:  buckets.matched.filter(match),
-      nasOnly:  buckets.nasOnly.filter(match),
-    };
+    return Object.fromEntries(Object.entries(buckets).map(([k, rows]) => [k, rows.filter(match)]));
   }, [buckets, search]);
 
   if (!report || !buckets) {
@@ -74,8 +71,23 @@ export default function VerifyResultsView({ scanResult, scanConfig, onBack }) {
   }
 
   const summary = report.summary || {};
-  const unbackedCount = buckets.unbacked.length;
-  const allBackedUp = unbackedCount === 0;
+  const missingCount = buckets.missing.length;
+  const unreadSource = summary.unreadableSourceCount || 0;
+  const allBackedUp = missingCount === 0 && unreadSource === 0;
+
+  // How strong a "backed up" claim this scan can make.
+  const matchedLabel = { thorough: 'Backed up', standard: 'Likely backed up', quick: 'Same name and size' }[confidence] || 'Backed up';
+  const goodHeadline = {
+    thorough: '✓ Every source file has a byte-for-byte identical copy in the backup.',
+    standard: '✓ Every source file appears to be in the backup.',
+    quick:    'Every source file has a backup file with the same name and size.',
+  }[confidence];
+  const strength = {
+    standard: 'Matched on size and the first 64 KB of each file. Run a Thorough scan to confirm every byte — corruption later in a file would not show here.',
+    quick:    'Quick match does not read file contents, so this is not proof of a backup. Run a Thorough scan before relying on it.',
+  }[confidence];
+  const sourcePath = (scanConfig?.protectedFolders || [])[0] || '';
+  const backupPath = (scanConfig?.targetFolders || [])[0] || '';
 
   const Section = ({ id, title, tint, rows }) => {
     const isOpen = open[id];
@@ -127,6 +139,9 @@ export default function VerifyResultsView({ scanResult, scanConfig, onBack }) {
         <div>
           <div style={S.label}>Verify backup</div>
           <h2 style={{ fontSize: scale(18), color:'var(--text-primary)', margin:`${scale(2)}px 0 0` }}>Backup coverage report</h2>
+          <div style={{ fontSize: scale(11), color:'var(--text-muted)', marginTop: scale(2) }}>
+            Is every file in <strong>{sourcePath}</strong> also in <strong>{backupPath}</strong>?
+          </div>
         </div>
         <button onClick={onBack} style={S.btnSecondary}>← New scan</button>
       </div>
@@ -139,32 +154,42 @@ export default function VerifyResultsView({ scanResult, scanConfig, onBack }) {
       }}>
         <div style={{ fontSize: scale(13), fontWeight: 600, color: allBackedUp ? 'var(--teal)' : 'var(--amber)' }}>
           {allBackedUp
-            ? '✓ Every desktop file was found on the NAS.'
-            : `⚠ ${unbackedCount.toLocaleString()} desktop file${unbackedCount !== 1 ? 's are' : ' is'} not on the NAS.`}
+            ? goodHeadline
+            : missingCount > 0
+              ? `⚠ ${missingCount.toLocaleString()} source file${missingCount !== 1 ? 's are' : ' is'} not in the backup.`
+              : `⚠ ${unreadSource.toLocaleString()} source file${unreadSource !== 1 ? 's' : ''} couldn't be read, so ${unreadSource !== 1 ? 'they were' : 'it was'} not checked.`}
         </div>
-        {!allBackedUp && (
+        {missingCount > 0 && (
           <div style={{ fontSize: scale(11), color:'var(--text-secondary)', marginTop: scale(4) }}>
-            These exist on your desktop/target but have no matching copy in the protected NAS folder — back them up before deleting anything.
+            No copy of these exists anywhere in the backup folder. Copy them to the backup before deleting anything from the source.
           </div>
+        )}
+        {missingCount > 0 && unreadSource > 0 && (
+          <div style={{ fontSize: scale(11), color:'var(--text-secondary)', marginTop: scale(4) }}>
+            {unreadSource.toLocaleString()} more source file{unreadSource !== 1 ? 's' : ''} couldn't be read and {unreadSource !== 1 ? 'were' : 'was'} not checked.
+          </div>
+        )}
+        {strength && (
+          <div style={{ fontSize: scale(11), color:'var(--text-secondary)', marginTop: scale(4) }}>{strength}</div>
         )}
       </div>
 
       {/* Summary cards */}
       <div style={{ display:'flex', gap: scale(12), marginBottom: scale(16) }}>
         <div style={S.card}>
-          <div style={S.label}>Backed up</div>
-          <div style={{ fontSize: scale(22), fontWeight: 700, color:'var(--teal)' }}>{buckets.matched.length.toLocaleString()}</div>
-          <div style={{ fontSize: scale(10), color:'var(--text-muted)' }}>{formatSize(summary.matchedSize)}</div>
+          <div style={S.label}>Missing from backup</div>
+          <div style={{ fontSize: scale(22), fontWeight: 700, color: missingCount ? 'var(--amber)' : 'var(--text-secondary)' }}>{missingCount.toLocaleString()}</div>
+          <div style={{ fontSize: scale(10), color:'var(--text-muted)' }}>{formatSize(summary.missingSize)}</div>
         </div>
         <div style={S.card}>
-          <div style={S.label}>Not on NAS</div>
-          <div style={{ fontSize: scale(22), fontWeight: 700, color: unbackedCount ? 'var(--amber)' : 'var(--text-secondary)' }}>{unbackedCount.toLocaleString()}</div>
-          <div style={{ fontSize: scale(10), color:'var(--text-muted)' }}>{formatSize(summary.desktopOnlySize)}</div>
+          <div style={S.label}>{matchedLabel}</div>
+          <div style={{ fontSize: scale(22), fontWeight: 700, color:'var(--teal)' }}>{buckets.backedUp.length.toLocaleString()}</div>
+          <div style={{ fontSize: scale(10), color:'var(--text-muted)' }}>of {(summary.totalSource || 0).toLocaleString()} source files · {formatSize(summary.backedUpSize)}</div>
         </div>
         <div style={S.card}>
-          <div style={S.label}>Only on NAS</div>
-          <div style={{ fontSize: scale(22), fontWeight: 700, color:'var(--text-secondary)' }}>{buckets.nasOnly.length.toLocaleString()}</div>
-          <div style={{ fontSize: scale(10), color:'var(--text-muted)' }}>{formatSize(summary.nasOnlySize)}</div>
+          <div style={S.label}>Only in backup</div>
+          <div style={{ fontSize: scale(22), fontWeight: 700, color:'var(--text-secondary)' }}>{buckets.backupOnly.length.toLocaleString()}</div>
+          <div style={{ fontSize: scale(10), color:'var(--text-muted)' }}>{formatSize(summary.backupOnlySize)}</div>
         </div>
       </div>
 
@@ -180,9 +205,12 @@ export default function VerifyResultsView({ scanResult, scanConfig, onBack }) {
 
       {/* Sections */}
       <div style={{ flex: 1, overflowY:'auto' }}>
-        <Section id="unbacked" title="Not on NAS (not backed up)" tint="var(--amber)" rows={filtered.unbacked} />
-        <Section id="matched"  title="Backed up (on both)"        tint="var(--teal)"  rows={filtered.matched} />
-        <Section id="nasOnly"  title="Only on NAS"                tint="var(--text-muted)" rows={filtered.nasOnly} />
+        <Section id="missing"    title="Missing from the backup"      tint="var(--amber)" rows={filtered.missing} />
+        {buckets.unreadable.length > 0 && (
+          <Section id="unreadable" title="Couldn't be read — not checked" tint="var(--danger)" rows={filtered.unreadable} />
+        )}
+        <Section id="backedUp"   title={`${matchedLabel} (source files)`} tint="var(--teal)" rows={filtered.backedUp} />
+        <Section id="backupOnly" title="Only in the backup"           tint="var(--text-muted)" rows={filtered.backupOnly} />
       </div>
     </div>
   );

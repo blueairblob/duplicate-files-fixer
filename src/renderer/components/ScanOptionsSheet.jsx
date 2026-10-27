@@ -113,11 +113,19 @@ export default function ScanOptionsSheet({
             border: '1px solid var(--border)', borderRadius: 'var(--radius-md)',
             overflow: 'hidden', marginBottom: scale(20),
           }}>
-            {[
-              { id: 'quick',    label: 'Quick',    hint: 'Size and name only — fastest, for backup checks' },
-              { id: 'standard', label: 'Standard', hint: 'Content sample; deletions verified first', recommended: true },
-              { id: 'thorough', label: 'Thorough', hint: 'Full byte-for-byte comparison during scan' },
-            ].map(({ id, label, hint, recommended }, i) => {
+            {(mode === 'verify'
+              // A backup check is only as good as what it reads.
+              ? [
+                  { id: 'quick',    label: 'Quick',    hint: 'Name and size only — not proof of a backup' },
+                  { id: 'standard', label: 'Standard', hint: 'Size and first 64 KB — misses corruption later in a file' },
+                  { id: 'thorough', label: 'Thorough', hint: 'Every byte compared — proves each file is backed up', recommended: true },
+                ]
+              : [
+                  { id: 'quick',    label: 'Quick',    hint: 'Name and size only — fastest; deletions verified first' },
+                  { id: 'standard', label: 'Standard', hint: 'Content sample; deletions verified first', recommended: true },
+                  { id: 'thorough', label: 'Thorough', hint: 'Full byte-for-byte comparison during scan' },
+                ]
+            ).map(({ id, label, hint, recommended }, i) => {
               const active = confidence === id;
               return (
                 <button key={id} onClick={() => onConfidence(id)} style={{

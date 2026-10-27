@@ -2,8 +2,8 @@
 //
 // Three-pass scan strategy:
 //   Pass 1: walk the directory tree, collect file metadata (stat only — cheap)
-//   Pass 2: for size-collision groups, hash first+last 64 KB only (boundary hash)
-//           This eliminates near-identical-but-not-identical files cheaply.
+//   Pass 2: for size-collision groups, hash the first 64 KB only (boundary hash)
+//           — head only on purpose, see hashFileBoundary.
 //   Pass 3: full SHA-256 only for files whose boundary hash also collides (rare).
 //           True duplicates always share the same full hash.
 //
@@ -21,6 +21,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { isExcluded } = require('./exclusions');
 const { normaliseRoot } = require('./roots');
+const { shouldIncludeFile, sizeCandidates, buildGroups, buildCensus, censusProblems, buildVerifyReport } = require('./scanCore');
 
 // Protected folders that sit inside a target root (normalised, see roots.js).
 // The target walk skips them so protected files are never seen as target files.
@@ -98,23 +99,7 @@ function cacheSave() {
   }
 }
 
-const SUPPORTED_EXTS = new Set([
-  '.jpg', '.jpeg', '.png', '.gif', '.heic', '.raw', '.bmp', '.webp',
-  '.mp3', '.aac', '.flac', '.wav', '.ogg', '.m4a',
-  '.mp4', '.mov', '.avi', '.mkv', '.wmv',
-  '.pdf', '.docx', '.xlsx', '.pptx', '.doc', '.xls', '.txt',
-  '.zip', '.rar', '.7z', '.eml',
-]);
-
-const TYPE_MAP = {
-  photos:   ['.jpg','.jpeg','.png','.gif','.heic','.raw','.bmp','.webp'],
-  audio:    ['.mp3','.aac','.flac','.wav','.ogg','.m4a'],
-  video:    ['.mp4','.mov','.avi','.mkv','.wmv'],
-  docs:     ['.pdf','.docx','.xlsx','.pptx','.doc','.xls','.txt'],
-  archives: ['.zip','.rar','.7z'],
-};
-
-// How many bytes to read from start + end of file for the cheap boundary hash.
+// How many bytes to read from the start of a file for the cheap boundary hash.
 const BOUNDARY_BYTES = 64 * 1024;
 
 let cancelled = false;
@@ -226,16 +211,6 @@ async function runPool(items, concurrency, task) {
   await Promise.all(runners);
 }
 
-function shouldIncludeExt(filePath, filters) {
-  const ext = path.extname(filePath).toLowerCase();
-  if (!SUPPORTED_EXTS.has(ext)) return false;
-  if (filters.types && filters.types.length > 0) {
-    const allowed = filters.types.flatMap(t => TYPE_MAP[t] || []);
-    if (!allowed.includes(ext)) return false;
-  }
-  return true;
-}
-
 // ── Hashing helpers ──────────────────────────────────────────────────────────
 
 // Full SHA-256 — only called when boundary hashes collide (rare).
@@ -342,7 +317,7 @@ async function walkCollect(dir, filters, exclusions, label, sourceFiles, warning
   // Stat this directory's files concurrently.
   await runPool(files, CONCURRENCY, async ({ fullPath, name }) => {
     if (cancelled) return;
-    if (!shouldIncludeExt(fullPath, filters)) return;
+    if (!shouldIncludeFile(fullPath, filters)) return;
     try {
       // bigint: NTFS file IDs can exceed 2^53, so a Number inode can collide.
       const stat = await fsp.stat(fullPath, { bigint: true });
@@ -382,97 +357,6 @@ async function walkCollect(dir, filters, exclusions, label, sourceFiles, warning
   }
 }
 
-// ── Census: the source-vs-target relationship, independent of duplicate groups ──
-//
-// Matching model is CONTENT-ANYWHERE: a target file counts as "in both" when its
-// content exists somewhere in the protected source, regardless of folder layout.
-// Backup trees rarely mirror the source, so path-parallel matching (FreeFileSync,
-// rsync) would report almost everything as target-only.
-//
-// The sharp edge: one source file can match many target files, so source-only is
-// NOT (sourceTotal - matchedTargetFiles). It must be counted over distinct source
-// files. Getting that wrong ships a summary whose numbers don't reconcile.
-function buildCensus(allFiles, fileMap, protectedFolders, targetFolders) {
-  const groupOf = new Map();               // path → sibling files sharing content
-  for (const files of fileMap.values()) {
-    for (const mf of files) groupOf.set(mf.path, files);
-  }
-
-  const srcFiles = allFiles.filter(f => f.sourceLabel === 'protected');
-  const tgtFiles = allFiles.filter(f => f.sourceLabel === 'target');
-
-  const matchedTarget = [];
-  const targetOnly    = [];
-  for (const f of tgtFiles) {
-    const g = groupOf.get(f.path);
-    (g && g.some(x => x.sourceLabel === 'protected') ? matchedTarget : targetOnly).push(f);
-  }
-
-  const sourceOnly = [];
-  let matchedSourceCount = 0;
-  for (const f of srcFiles) {
-    const g = groupOf.get(f.path);
-    if (g && g.some(x => x.sourceLabel === 'target')) matchedSourceCount++;
-    else sourceOnly.push(f);
-  }
-
-  const sum = arr => arr.reduce((a, f) => a + (f.size || 0), 0);
-
-  // Folder rollup over TARGET files only — source folders carry no decision.
-  const folderMap = new Map();
-  let pathBudget = 200000;   // cap so a million-file scan can't blow the payload
-  for (const f of tgtFiles) {
-    const rel = path.relative(f.root || '', path.dirname(f.path)) || '.';
-    if (!folderMap.has(rel)) {
-      folderMap.set(rel, { path: rel, root: f.root, files: 0, matched: 0, targetOnly: 0, bytes: 0, reclaimable: 0, matchedPaths: [], truncated: false });
-    }
-    const e = folderMap.get(rel);
-    e.files++;
-    e.bytes += f.size || 0;
-    const g = groupOf.get(f.path);
-    if (g && g.some(x => x.sourceLabel === 'protected')) {
-      e.matched++;
-      e.reclaimable += f.size || 0;
-      if (pathBudget > 0) { e.matchedPaths.push(f.path); pathBudget--; }
-      else e.truncated = true;
-    }
-    else e.targetOnly++;
-  }
-  const folders = Array.from(folderMap.values()).map(e => ({
-    ...e,
-    state: e.matched === e.files ? 'all' : e.matched === 0 ? 'none' : 'partial',
-  })).sort((a, b) => b.reclaimable - a.reclaimable);
-
-  const census = {
-    roots: {
-      source: { paths: protectedFolders || [], files: srcFiles.length, bytes: sum(srcFiles) },
-      target: { paths: targetFolders    || [], files: tgtFiles.length, bytes: sum(tgtFiles) },
-    },
-    matched:    { targetFiles: matchedTarget.length, sourceFiles: matchedSourceCount, bytes: sum(matchedTarget) },
-    sourceOnly: { files: sourceOnly.length, bytes: sum(sourceOnly), list: sourceOnly.slice(0, 5000).map(f => ({ path: f.path, size: f.size, modified: f.modified, ext: f.ext })) },
-    targetOnly: { files: targetOnly.length, bytes: sum(targetOnly), list: targetOnly.slice(0, 5000).map(f => ({ path: f.path, size: f.size, modified: f.modified, ext: f.ext })) },
-    folders,
-  };
-
-  // Invariants — log loudly rather than throw, so a bad rollup never kills a scan.
-  const checks = [
-    ['target total',  census.matched.targetFiles + census.targetOnly.files, census.roots.target.files],
-    ['source total',  census.matched.sourceFiles + census.sourceOnly.files, census.roots.source.files],
-    ['folder total',  folders.reduce((a, f) => a + f.files, 0),             census.roots.target.files],
-  ];
-  for (const [name, got, want] of checks) {
-    if (got !== want) console.error(`[census] INVARIANT FAILED ${name}: ${got} !== ${want}`);
-  }
-
-  console.log(`[census] source ${census.roots.source.files.toLocaleString()} · target ${census.roots.target.files.toLocaleString()} · in both ${census.matched.targetFiles.toLocaleString()} (${(census.matched.bytes / 1073741824).toFixed(2)} GB) · source-only ${census.sourceOnly.files.toLocaleString()} · target-only ${census.targetOnly.files.toLocaleString()}`);
-  if (PERF_VERBOSE) {
-    console.log(`[census] matched source files ${census.matched.sourceFiles.toLocaleString()} (differs from target when one source file covers several copies)`);
-    console.log(`[census] folders ${folders.length}  (all=${folders.filter(f => f.state === 'all').length} partial=${folders.filter(f => f.state === 'partial').length} none=${folders.filter(f => f.state === 'none').length})`);
-  }
-
-  return census;
-}
-
 async function run() {
   perfPhase('walk');
   const { mode, protectedFolders, targetFolders, filters, autoMarkRule, exclusions, includeEmpty } = workerData;
@@ -509,28 +393,10 @@ async function run() {
   const nonEmptyFiles = allFiles.filter(f => !f.isEmpty);
 
   // ── Pass 2: group by size, boundary-hash only collisions ─────────────────
-  const bySize = new Map();
-  for (const f of nonEmptyFiles) {
-    if (!bySize.has(f.size)) bySize.set(f.size, []);
-    bySize.get(f.size).push(f);
-  }
-
-  const candidateFiles = [];
-  for (const group of bySize.values()) {
-    if (group.length >= 2) candidateFiles.push(...group);
-  }
-
-  // Dedupe by path (files were observed enqueued twice) and sort by path so
-  // reads arrive in directory order — friendly to spinning-disk layouts and
-  // the NAS's read-ahead.
-  const seenPaths = new Set();
-  const dedupedCandidates = candidateFiles.filter(f => {
-    if (seenPaths.has(f.path)) return false;
-    seenPaths.add(f.path);
-    return true;
-  }).sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-  candidateFiles.length = 0;
-  candidateFiles.push(...dedupedCandidates);
+  const candidateFiles = sizeCandidates(nonEmptyFiles);
+  // Files whose content couldn't be read: reported as their own bucket, never
+  // as "not backed up" / "only in target".
+  const unreadable = new Set();
   const candidateCount = candidateFiles.length;
   emitProgress({ phase: 'hashing', scanned: 0, total: candidateCount, currentPath: firstFolder }, true);
   perfPhase('boundary-hash', candidateCount);
@@ -565,6 +431,7 @@ async function run() {
       perfTick();
       emitProgress({ phase: 'hashing', scanned: counter.hashed, total: candidateCount, currentPath: file.path });
     } catch (e) {
+      unreadable.add(file.path);
       warnings.push({ path: file.path, reason: e.code === 'EBUSY' ? 'File locked' : e.message });
     }
   });
@@ -604,6 +471,7 @@ async function run() {
       fileMap.get(hash).push({ ...file });
       emitProgress({ phase: 'verifying', scanned: fullHashed, total: fullHashTotal, currentPath: file.path });
     } catch (e) {
+      unreadable.add(file.path);
       warnings.push({ path: file.path, reason: e.code === 'EBUSY' ? 'File locked' : e.message });
     }
   });
@@ -623,101 +491,16 @@ async function run() {
   // zero-byte files are reported separately and never content-matched.
   let census = null;
   if (mode === 'compare') {
-    census = buildCensus(nonEmptyFiles, fileMap, protectedFolders, targetFolders);
+    census = buildCensus(nonEmptyFiles, fileMap, protectedFolders, targetFolders, unreadable);
+    for (const problem of censusProblems(census)) console.error(`[census] INVARIANT FAILED ${problem}`);
+    console.log(`[census] source ${census.roots.source.files.toLocaleString()} · target ${census.roots.target.files.toLocaleString()} · in both ${census.matched.targetFiles.toLocaleString()} (${(census.matched.bytes / 1073741824).toFixed(2)} GB) · source-only ${census.sourceOnly.files.toLocaleString()} · target-only ${census.targetOnly.files.toLocaleString()} · unreadable ${(census.unreadable.sourceFiles + census.unreadable.targetFiles).toLocaleString()}`);
   }
 
-  // ── Build duplicate groups (compare / simple modes) ──────────────────────
-  const groups = [];
-  let groupId = 0;
+  // ── Duplicate groups (compare / simple modes) ────────────────────────────
+  const groups = mode === 'verify' ? [] : buildGroups(fileMap, mode, autoMarkRule);
 
-  if (mode !== 'verify') {
-    for (const [hash, files] of fileMap.entries()) {
-      if (files.length < 2) continue;
-
-      const hasProtected = files.some(f => f.sourceLabel === 'protected');
-      const hasTarget    = files.some(f => f.sourceLabel === 'target');
-      if (mode === 'compare' && !hasTarget) continue;
-
-      const markedPaths = new Set();
-      if (mode === 'compare' && hasProtected) {
-        files.filter(f => f.sourceLabel === 'target').forEach(f => markedPaths.add(f.path));
-      } else {
-        let sorted;
-        if (autoMarkRule === 'keep-oldest') {
-          sorted = [...files].sort((a, b) => new Date(a.modified) - new Date(b.modified));
-        } else if (autoMarkRule === 'keep-largest') {
-          sorted = [...files].sort((a, b) => b.size - a.size);
-        } else {
-          sorted = [...files].sort((a, b) => new Date(b.modified) - new Date(a.modified));
-        }
-        sorted.slice(1).forEach(f => markedPaths.add(f.path));
-      }
-
-      groups.push({ id: groupId++, hash, files, autoMarked: Array.from(markedPaths), hasProtected });
-    }
-  }
-
-  // ── Build verify report ───────────────────────────────────────────────────
-  // Three buckets: matched (in both), nasOnly (protected only — backup gap),
-  // desktopOnly (target only — safe but not in NAS).
-  let verifyReport = null;
-  if (mode === 'verify') {
-    const matched     = []; // files in both
-    const nasOnly     = []; // protected only — missing from desktop
-    const desktopOnly = []; // target only — extra on desktop
-
-    for (const [hash, files] of fileMap.entries()) {
-      const hasProtected = files.some(f => f.sourceLabel === 'protected');
-      const hasTarget    = files.some(f => f.sourceLabel === 'target');
-      if (hasProtected && hasTarget) {
-        matched.push({
-          hash,
-          nasFile:     files.find(f => f.sourceLabel === 'protected'),
-          desktopFile: files.find(f => f.sourceLabel === 'target'),
-          allFiles: files,
-        });
-      } else if (hasProtected && !hasTarget) {
-        files.filter(f => f.sourceLabel === 'protected').forEach(f => nasOnly.push(f));
-      } else if (!hasProtected && hasTarget) {
-        files.filter(f => f.sourceLabel === 'target').forEach(f => desktopOnly.push(f));
-      }
-    }
-
-    // Size-singleton files never entered fileMap — add them to the right bucket.
-    // Build the set of hashed paths once (O(n)) instead of rescanning fileMap for
-    // every file (O(n*m)), which was pathological on large trees / NAS scans.
-    const hashedPaths = new Set();
-    for (const files of fileMap.values()) {
-      for (const mf of files) hashedPaths.add(mf.path);
-    }
-    for (const f of nonEmptyFiles) {
-      if (!hashedPaths.has(f.path)) {
-        if (f.sourceLabel === 'protected') nasOnly.push(f);
-        else desktopOnly.push(f);
-      }
-    }
-
-    nasOnly.sort((a, b) => a.path.localeCompare(b.path));
-    desktopOnly.sort((a, b) => a.path.localeCompare(b.path));
-
-    const sum = arr => arr.reduce((acc, f) => acc + (f.size || f.nasFile?.size || 0), 0);
-
-    verifyReport = {
-      matched,
-      nasOnly,
-      desktopOnly,
-      summary: {
-        matchedCount:     matched.length,
-        nasOnlyCount:     nasOnly.length,
-        desktopOnlyCount: desktopOnly.length,
-        matchedSize:      sum(matched.map(m => m.nasFile)),
-        nasOnlySize:      sum(nasOnly),
-        desktopOnlySize:  sum(desktopOnly),
-        totalNas:         allFiles.filter(f => f.sourceLabel === 'protected').length,
-        totalDesktop:     allFiles.filter(f => f.sourceLabel === 'target').length,
-      },
-    };
-  }
+  // ── Verify report: is every source file in the backup? ───────────────────
+  const verifyReport = mode === 'verify' ? buildVerifyReport(nonEmptyFiles, fileMap, unreadable) : null;
 
   // ── Empty file groups ─────────────────────────────────────────────────────
   const emptyGroups = (includeEmpty && emptyFiles.length > 0)

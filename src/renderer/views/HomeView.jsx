@@ -131,13 +131,19 @@ export default function HomeView({ onStartScan, preset = null, exclusionCount = 
   const [minSize, setMinSize] = useState(savedOptions.minSize || 0);
   const [includeEmpty, setIncludeEmpty] = useState(!!savedOptions.includeEmpty);
   const [autoMarkRule, setAutoMarkRule] = useState(savedOptions.autoMarkRule || 'protected-wins');
-  const [confidence, setConfidence] = useState(savedOptions.confidence || 'standard');
+  // Verify keeps its own confidence, defaulting to Thorough: a backup verdict
+  // is only as strong as what was read. Compare/simple default to Standard
+  // (deletions are verified byte-for-byte at delete time anyway).
+  const [scanConfidence, setScanConfidence] = useState(savedOptions.confidence || 'standard');
+  const [verifyConfidence, setVerifyConfidence] = useState(savedOptions.verifyConfidence || 'thorough');
+  const confidence = mode === 'verify' ? verifyConfidence : scanConfidence;
+  const setConfidence = mode === 'verify' ? setVerifyConfidence : setScanConfidence;
 
   useEffect(() => {
     try {
-      localStorage.setItem('dff-scan-options', JSON.stringify({ types, minSize, includeEmpty, autoMarkRule, confidence }));
+      localStorage.setItem('dff-scan-options', JSON.stringify({ types, minSize, includeEmpty, autoMarkRule, confidence: scanConfidence, verifyConfidence }));
     } catch { /* non-fatal */ }
-  }, [types, minSize, includeEmpty, autoMarkRule, confidence]);
+  }, [types, minSize, includeEmpty, autoMarkRule, scanConfidence, verifyConfidence]);
   const [optionsOpen, setOptionsOpen] = useState(false);
 
   // Seed the form when a history/recents entry is loaded. Keyed so clicking
@@ -145,7 +151,7 @@ export default function HomeView({ onStartScan, preset = null, exclusionCount = 
   useEffect(() => {
     if (!preset) return;
     setMode(preset.mode || 'compare');
-    if (preset.confidence) setConfidence(preset.confidence);
+    if (preset.confidence) (preset.mode === 'verify' ? setVerifyConfidence : setScanConfidence)(preset.confidence);
     if (preset.mode === 'simple') {
       setSimpleFolders(preset.targetFolders || []);
     } else {
@@ -338,7 +344,7 @@ export default function HomeView({ onStartScan, preset = null, exclusionCount = 
           includeEmpty={includeEmpty} onIncludeEmpty={setIncludeEmpty}
           autoMarkRule={autoMarkRule} onAutoMarkRule={setAutoMarkRule}
           confidence={confidence} onConfidence={setConfidence}
-          onReset={() => { setTypes([]); setMinSize(0); setIncludeEmpty(false); setAutoMarkRule('protected-wins'); setConfidence('standard'); }}
+          onReset={() => { setTypes([]); setMinSize(0); setIncludeEmpty(false); setAutoMarkRule('protected-wins'); setScanConfidence('standard'); setVerifyConfidence('thorough'); }}
           onClose={() => setOptionsOpen(false)}
         />
       )}

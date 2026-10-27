@@ -51,6 +51,28 @@ describe('scanWorker (real worker thread)', () => {
     expect(r.warnings.some(w => /more than one path/.test(w.reason))).toBe(true);
   });
 
+  it('verify mode reports source files missing from the backup', async () => {
+    write('src/kept.jpg', 'kept');
+    write('src/lost.cr2', 'raw photo never copied');
+    write('backup/kept-copy.jpg', 'kept');
+    write('backup/extra.txt', 'only in backup');
+    const r = await runScan({ mode: 'verify', protectedFolders: [path.join(tmp, 'src')], targetFolders: [path.join(tmp, 'backup')], confidence: 'thorough' });
+    expect(r.verifyReport.missing.map(f => path.basename(f.path))).toEqual(['lost.cr2']);
+    expect(r.verifyReport.backedUp).toHaveLength(1);
+    expect(r.verifyReport.backupOnly.map(f => path.basename(f.path))).toEqual(['extra.txt']);
+  });
+
+  it('scans file types outside the old allowlist (RAW, TIFF, no extension)', async () => {
+    write('src/a.nef', 'raw');
+    write('tgt/a-copy.nef', 'raw');
+    write('src/scan.tiff', 'tiff');
+    write('tgt/scan-copy.tiff', 'tiff');
+    write('src/README', 'no ext');
+    write('tgt/README-copy', 'no ext');
+    const r = await runScan({ mode: 'compare', protectedFolders: [path.join(tmp, 'src')], targetFolders: [path.join(tmp, 'tgt')], confidence: 'thorough' });
+    expect(r.groups).toHaveLength(3);
+  });
+
   it('never offers protected files for deletion when the protected folder is inside the target', async () => {
     const protectedRoot = path.join(tmp, 'all', 'Photos');
     const targetRoot = path.join(tmp, 'all');
