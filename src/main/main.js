@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, screen, session } = require('electron');
 
 // UV_THREADPOOL_SIZE must be in the environment BEFORE libuv creates its thread
 // pool; Electron may touch async I/O during startup, so setting it in-process
@@ -23,8 +23,26 @@ const { buildSession } = require('./deleteGuard');
 const { checkRoots } = require('./system');
 const { createDeleteService } = require('./deleteService');
 const { getLocations } = require('./locations');
+const { makeAppUrlCheck, hardenWebContents, denyAllPermissions } = require('./security');
 
 const isDev = process.env.NODE_ENV === 'development';
+const DEV_URL = 'http://localhost:5173';
+const INDEX_PATH = path.join(__dirname, '../../dist/index.html');
+const isAppUrl = makeAppUrlCheck({ isDev, devUrl: DEV_URL, indexPath: INDEX_PATH });
+
+// IPC only from the app's own page. Wraps ipcMain.handle / ipcMain.on.
+function fromApp(event) { return isAppUrl(event.senderFrame && event.senderFrame.url); }
+function handle(channel, fn) {
+  ipcMain.handle(channel, (event, ...args) => {
+    if (!fromApp(event)) throw new Error(`Blocked ${channel}: request did not come from the app`);
+    return fn(event, ...args);
+  });
+}
+function on(channel, fn) {
+  ipcMain.on(channel, (event, ...args) => { if (fromApp(event)) fn(event, ...args); });
+}
+
+app.on('web-contents-created', (_event, contents) => hardenWebContents(contents, isAppUrl));
 
 let activeWorker = null;
 let lastSession = null; // deleteGuard session from the last completed scan
@@ -67,19 +85,23 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
+      webviewTag: false,
+      spellcheck: false,
     },
   });
 
   if (isDev) {
-    win.loadURL('http://localhost:5173');
+    win.loadURL(DEV_URL);
   } else {
-    win.loadFile(path.join(__dirname, '../../dist/index.html'));
+    win.loadFile(INDEX_PATH);
   }
 
   return win;
 }
 
 app.whenReady().then(() => {
+  denyAllPermissions(session.defaultSession);
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -91,14 +113,14 @@ app.on('window-all-closed', () => {
 });
 
 // ── IPC: Pick folder ──────────────────────────────────────────────────────────
-ipcMain.handle('dialog:openFolder', async (_event, defaultPath) => {
+handle('dialog:openFolder', async (_event, defaultPath) => {
   const opts = { properties: ['openDirectory', 'multiSelections'] };
   if (defaultPath) opts.defaultPath = defaultPath;
   const result = await dialog.showOpenDialog(opts);
   return result.canceled ? [] : result.filePaths;
 });
 
-ipcMain.handle('dialog:saveTextFile', async (_event, defaultName, content) => {
+handle('dialog:saveTextFile', async (_event, defaultName, content) => {
   const result = await dialog.showSaveDialog({
     defaultPath: defaultName || 'report.txt',
     filters: [{ name: 'Text files', extensions: ['txt'] }],
@@ -109,7 +131,7 @@ ipcMain.handle('dialog:saveTextFile', async (_event, defaultName, content) => {
 });
 
 // ── IPC: Drive / network locations (async — see locations.js) ─────────────────
-ipcMain.handle('fs:getLocations', async () => getLocations());
+handle('fs:getLocations', async () => getLocations());
 
 // ── IPC: Exclusion list (in-memory; persisted properly in Sprint 4) ──────────
 // Exclusions persist in userData/dff-exclusions.json (written atomically).
@@ -136,15 +158,15 @@ async function saveExclusions(list) {
   return exclusionList;
 }
 
-ipcMain.handle('exclusions:get', async () => loadExclusions());
-ipcMain.handle('exclusions:set', async (_event, list) =>
+handle('exclusions:get', async () => loadExclusions());
+handle('exclusions:set', async (_event, list) =>
   Array.isArray(list) ? saveExclusions(list.filter(x => typeof x === 'string')) : loadExclusions());
-ipcMain.handle('exclusions:resetDefaults', async () => saveExclusions([...DEFAULT_EXCLUSIONS]));
+handle('exclusions:resetDefaults', async () => saveExclusions([...DEFAULT_EXCLUSIONS]));
 
-ipcMain.handle('scan:checkRoots', async (_event, opts) => checkRoots(opts));
+handle('scan:checkRoots', async (_event, opts) => checkRoots(opts));
 
 // ── IPC: Scan (worker-thread based) ───────────────────────────────────────────
-ipcMain.handle('scan:start', async (event, opts) => {
+handle('scan:start', async (event, opts) => {
   const win = BrowserWindow.fromWebContents(event.sender);
 
   // Enforced here as well as in the UI: overlapping or aliased roots can make
@@ -222,7 +244,7 @@ ipcMain.handle('scan:start', async (event, opts) => {
   });
 });
 
-ipcMain.handle('scan:cancel', async () => {
+handle('scan:cancel', async () => {
   if (activeWorker) {
     activeWorker.postMessage({ type: 'cancel' });
     return true;
@@ -245,9 +267,9 @@ function getDeleteService() {
   return deleteService;
 }
 
-ipcMain.handle('files:cancelDelete', async () => { getDeleteService().cancel(); return true; });
+handle('files:cancelDelete', async () => { getDeleteService().cancel(); return true; });
 
-ipcMain.handle('files:delete', async (event, payload) => {
+handle('files:delete', async (event, payload) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   return getDeleteService().deleteFiles(lastSession, payload, (p) => win?.webContents.send('files:deleteProgress', p));
 });
@@ -256,7 +278,7 @@ ipcMain.handle('files:delete', async (event, payload) => {
 // the Settings page never has to parse the (possibly 100 MB) cache itself.
 const sigCachePath = () => path.join(app.getPath('userData'), 'dff-signature-cache.json');
 
-ipcMain.handle('cache:info', async () => {
+handle('cache:info', async () => {
   const p = sigCachePath();
   try {
     const stat = await fs.promises.stat(p);
@@ -268,7 +290,7 @@ ipcMain.handle('cache:info', async () => {
   }
 });
 
-ipcMain.handle('cache:clear', async () => {
+handle('cache:clear', async () => {
   try {
     await fs.promises.rm(sigCachePath(), { force: true });
     await fs.promises.rm(sigCachePath() + '.meta.json', { force: true });
@@ -278,14 +300,14 @@ ipcMain.handle('cache:clear', async () => {
   }
 });
 
-ipcMain.handle('files:getQuarantineManifest', async () => getDeleteService().listQuarantine());
+handle('files:getQuarantineManifest', async () => getDeleteService().listQuarantine());
 
-ipcMain.handle('files:restoreFromQuarantine', async (_event, quarantinePath) => getDeleteService().restore(quarantinePath));
+handle('files:restoreFromQuarantine', async (_event, quarantinePath) => getDeleteService().restore(quarantinePath));
 
 // ── IPC: Window controls ──────────────────────────────────────────────────────
-ipcMain.on('window:minimize', () => BrowserWindow.getFocusedWindow()?.minimize());
-ipcMain.on('window:maximize', () => {
+on('window:minimize', () => BrowserWindow.getFocusedWindow()?.minimize());
+on('window:maximize', () => {
   const win = BrowserWindow.getFocusedWindow();
   win?.isMaximized() ? win.unmaximize() : win?.maximize();
 });
-ipcMain.on('window:close', () => BrowserWindow.getFocusedWindow()?.close());
+on('window:close', () => BrowserWindow.getFocusedWindow()?.close());
