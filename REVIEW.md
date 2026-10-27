@@ -304,3 +304,26 @@ Done on branch `phase-b-verdicts`:
   - The doubled border is fixed.
   - "N more" counts are accurate.
   - `npm test` is wired up.
+
+---
+
+## Phase C — status
+
+Done on branch `phase-c-scale`:
+- **M3 (blocking I/O in the main process):**
+  - Location detection is async in `locations.js`; the two PowerShell lookups run in parallel (about 1 s, without blocking).
+  - `cache:info` reads a small `.meta.json` sidecar instead of parsing the cache.
+  - The unused `fs:listDirectory` IPC is removed.
+- **M8, M9 (exclusions):**
+  - Name and glob entries match only below the scan root.
+  - Path prefixes need a folder boundary.
+  - The list is compiled once per scan and persists in `userData`.
+  - The `Windows` default became a `C:\Windows` prefix.
+- **M7 (parallel walk):** folders are read in parallel through one shared pool. Many small folders on the NAS: 10.8 s → 3.1 s. 50,000 local files: 5.7 s → 2.6 s.
+- **M6 (per-device limits):** read limits are keyed by `stat.dev`, so POSIX drives get their own.
+- **M4 (delete as a job):** checks run 4 at a time, moves happen one at a time, and **Stop deleting** works. Network files are always content-compared at delete time, which closes the SMB timestamp gap found in Phase A.
+- **M5 (part — Results screen):** pages of 200 groups, collapsed by default when large, memoized group cards, and cheap totals. Covered by a jsdom test with 5,000 groups.
+
+Not done, deliberately:
+- **Results held in main and paged to the screen.** The worker still posts every group in one message. That is fine for tens of thousands of groups; revisit if real scans hit memory limits.
+- **SQLite signature cache.** `better-sqlite3` is a native module that must be rebuilt for each Electron version, which adds packaging risk. The JSON cache plus the `.meta.json` sidecar removes the main-process cost. The worker still parses the whole cache once per scan. Revisit with a measured cache over ~200k entries.

@@ -17,6 +17,7 @@ npx vitest run src/tests/exclusions.test.js      # single file
 npx vitest run -t "glob"                         # tests matching a name
 DFF_PERF=1 npm run dev                           # verbose per-phase/per-file scan timings
 node tools/bench-smb.js "<folder>"               # SMB read-throughput benchmark (set UV_THREADPOOL_SIZE=64 first)
+node tools/bench-walk.js <parent> [folders] [files] # many-small-folders scan benchmark (creates + removes a tree)
 ```
 
 Requires Node 20.12+ (Vite 8 needs `util.styleText`; Node 18 crashes). On Windows with a NAS, run natively, not in WSL.
@@ -41,14 +42,18 @@ Three process layers:
   - `quarantine.js` moves files into `<volume>/.dff-quarantine` (then scan root, then home), same-volume only. It keeps an append-only `manifest.jsonl`; known folders are listed in `userData/dff-quarantine-dirs.json`.
   - **Nothing is ever permanently deleted**: if no route works, the file is reported as not deleted.
 - **Signature cache:** `userData/dff-signature-cache.json`, keyed on path + size + mtime. Written by the worker, reused by delete-time verification.
-- **Persistence:** exclusions are in-memory in main (defaults in `exclusions.js`). Scan history (`utils/scanHistory.js`) and theme (`utils/theme.js`) use renderer `localStorage`.
+- **Persistence:** exclusions persist in `userData/dff-exclusions.json` (defaults in `exclusions.js`; name/glob entries match only below the scan root; path prefixes need a folder boundary). Scan options, history (`utils/scanHistory.js`) and theme (`utils/theme.js`) use renderer `localStorage`.
+- **Deletes run as a job:** `executeDeletion` checks up to 4 files at once but moves them one at a time; `files:cancelDelete` stops it, and network files are always content-compared at delete time.
+- **Results screen:** groups render 200 per page via the memoized `GroupCard`, and start collapsed above 50 groups. Keep per-click work proportional to what changed.
 - **Styling:** design tokens as CSS variables in `index.css` (light/dark via `data-theme`). HiDPI scaling via `useDPR` / `DPRContext`; use its `scale(px)` for inline sizes authored at the 13px/1.0 baseline.
 
 ### Performance constraints (NAS scanning)
 
 - `UV_THREADPOOL_SIZE=64` must be in the environment before Electron starts. The dev script sets it; packaged builds relaunch themselves once to apply it. Setting it later in-process has no effect.
 - Boundary hash reads the file head only, on purpose: a tail read is a far-offset seek that is very slow on NAS spinning disks. Don't add a tail read back.
-- I/O goes through a bounded async pool (`CONCURRENCY`, default 32) plus per-drive-root caps (`ROOT_LIMIT`, `STREAM_ROOT_LIMIT`). Keep worker I/O async so cancel and progress stay responsive.
+- The walk is one shared pool of `CONCURRENCY` (default 32) runners over a queue of folders and files. Protected roots finish before target roots start, because identity dedupe must keep the protected copy.
+- Hashing has extra per-device caps (`ROOT_LIMIT`, `STREAM_ROOT_LIMIT`), keyed by `stat.dev`. Keep worker I/O async so cancel and progress stay responsive.
+- The main process must not do blocking I/O. Location detection lives in async `locations.js`, and `cache:info` reads the worker's small `.meta.json` sidecar instead of the cache.
 
 ## Tests
 
@@ -58,4 +63,4 @@ Every suite imports real source: `scanCore`, `scanWorker` (spawns the real worke
 
 ## Plans
 
-`REVIEW.md` holds the full review and the phased fix plan, with status notes at the end (Phase A merged to `main`; Phase B on `phase-b-verdicts`). `PLAN.md` is the original sprint plan and predates REVIEW.md.
+`REVIEW.md` holds the full review and the phased fix plan, with status notes at the end (Phases A–B merged to `main`; Phase C on `phase-c-scale`). `PLAN.md` is the original sprint plan and predates REVIEW.md.
