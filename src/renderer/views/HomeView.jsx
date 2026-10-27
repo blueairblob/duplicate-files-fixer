@@ -120,8 +120,13 @@ function FolderZone({ label, sublabel, Icon, iconColor, folders, onAddPath, onRe
 }
 
 // ── Main view ────────────────────────────────────────────────────────────────
-export default function HomeView({ onStartScan, preset = null, exclusionCount = 0 }) {
+export default function HomeView({ onStartScan, preset = null }) {
   const { scale } = useDPR();
+  // Shown in the options summary; re-read each time Home is shown.
+  const [exclusionCount, setExclusionCount] = useState(0);
+  useEffect(() => {
+    api?.getExclusions?.().then(list => setExclusionCount(Array.isArray(list) ? list.length : 0)).catch(() => {});
+  }, []);
   const [mode, setMode] = useState('compare');
   const [protectedFolders, setProtectedFolders] = useState([]);
   const [targetFolders, setTargetFolders] = useState([]);

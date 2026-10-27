@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, screen, session } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, screen, session, nativeTheme } = require('electron');
 
 // UV_THREADPOOL_SIZE must be in the environment BEFORE libuv creates its thread
 // pool; Electron may touch async I/O during startup, so setting it in-process
@@ -51,6 +51,7 @@ function on(channel, fn) {
 app.on('web-contents-created', (_event, contents) => hardenWebContents(contents, isAppUrl));
 
 let activeWorker = null;
+let finishActiveScan = null; // resolves the in-flight scan:start promise
 let lastSession = null; // deleteGuard session from the last completed scan
 let exclusionList = null; // loaded from userData on first use; see loadExclusions()
 
@@ -86,7 +87,8 @@ function createWindow() {
     height,
     minWidth: Math.min(Math.round(BASE_MIN_WIDTH * sizeFactor), workAreaSize.width),
     minHeight: Math.min(Math.round(BASE_MIN_HEIGHT * sizeFactor), workAreaSize.height),
-    backgroundColor: '#0d0f14',
+    // Matches --bg-window in index.css, so there's no dark flash in light mode.
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#1e1e20' : '#f5f5f7',
     frame: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -239,11 +241,18 @@ handle('scan:start', async (event, opts) => {
 
   const exclusions = await loadExclusions();
 
-  return new Promise((resolve) => {
+  return new Promise((resolveScan) => {
+    // A new scan supersedes a running one: answer the old caller first, so
+    // its promise doesn't hang forever after terminate().
     if (activeWorker) {
-      try { activeWorker.terminate(); } catch {}
+      const old = activeWorker;
       activeWorker = null;
+      if (finishActiveScan) finishActiveScan({ groups: [], emptyFiles: [], totalScanned: 0, totalHashed: 0, warnings: [], cancelled: true });
+      try { old.terminate(); } catch {}
     }
+    let settled = false;
+    const resolve = (result) => { if (!settled) { settled = true; resolveScan(result); } };
+    finishActiveScan = resolve;
 
     const worker = new Worker(WORKER_PATH, {
       workerData: {
@@ -281,12 +290,9 @@ handle('scan:start', async (event, opts) => {
     });
 
     worker.on('error', (err) => {
-      activeWorker = null;
-      resolve({ groups: [], emptyFiles: [], totalScanned: 0, totalHashed: 0, warnings: [{ path: '-', reason: err.message }], error: err.message });
-    });
-	
-	worker.on('error', (err) => {
       console.error('[scan] worker error:', err);
+      if (activeWorker === worker) activeWorker = null;
+      resolve({ groups: [], emptyFiles: [], totalScanned: 0, totalHashed: 0, warnings: [{ path: '-', reason: err.message }], error: err.message });
     });
 
     worker.on('exit', (code) => {
@@ -298,8 +304,6 @@ handle('scan:start', async (event, opts) => {
           error: `Worker exited unexpectedly (code ${code})` });
       }
     });
-	
-	
   });
 });
 

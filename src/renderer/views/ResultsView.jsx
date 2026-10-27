@@ -242,9 +242,12 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
     });
   }, []);
 
+  // In a view scoped from Compare, stay inside the chosen folders.
   const autoMarkAll = () => {
     const next = new Set();
-    groups.forEach(g => (g.autoMarked || []).forEach(p => next.add(p)));
+    groups.forEach(g => (g.autoMarked || []).forEach(p => {
+      if (deletable.has(p) && (!selSet || selSet.has(p))) next.add(p);
+    }));
     setMarked(next);
   };
   const deselectAll = () => setMarked(new Set());
