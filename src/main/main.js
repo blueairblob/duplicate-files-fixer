@@ -28,6 +28,12 @@ const { makeAppUrlCheck, hardenWebContents, denyAllPermissions } = require('./se
 const isDev = process.env.NODE_ENV === 'development';
 const DEV_URL = 'http://localhost:5173';
 const INDEX_PATH = path.join(__dirname, '../../dist/index.html');
+// Worker threads can't load from inside app.asar; package.json unpacks
+// src/main (the worker and the modules it requires) next to it.
+const WORKER_PATH = path.join(__dirname, 'scanWorker.js').replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`);
+// DFF_SMOKE=1: load the built page in a hidden window, run one real scan,
+// print the result and exit (used by `npm run smoke` and CI).
+const SMOKE = process.env.DFF_SMOKE === '1';
 const isAppUrl = makeAppUrlCheck({ isDev, devUrl: DEV_URL, indexPath: INDEX_PATH });
 
 // IPC only from the app's own page. Wraps ipcMain.handle / ipcMain.on.
@@ -75,6 +81,7 @@ function createWindow() {
   const height = Math.min(Math.round(BASE_HEIGHT * sizeFactor), workAreaSize.height);
 
   const win = new BrowserWindow({
+    show: !SMOKE,
     width,
     height,
     minWidth: Math.min(Math.round(BASE_MIN_WIDTH * sizeFactor), workAreaSize.width),
@@ -102,11 +109,63 @@ function createWindow() {
 
 app.whenReady().then(() => {
   denyAllPermissions(session.defaultSession);
+  if (SMOKE) { runSmoke().then(ok => app.exit(ok ? 0 : 1), (e) => { console.error('[smoke] crashed', e); app.exit(1); }); return; }
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
+
+// ── Smoke test (DFF_SMOKE=1) ─────────────────────────────────────────────────
+// Proves a build works end to end without anyone looking at it: the page
+// renders under the sandbox + CSP, the preload bridge is there, and the scan
+// worker loads (from app.asar.unpacked when packaged) and finds a duplicate.
+async function runSmoke() {
+  const report = { packaged: app.isPackaged, errors: [] };
+  const win = createWindow();
+  win.webContents.on('console-message', (event, level, message) => {
+    const lvl = event.level ?? level;
+    const msg = event.message ?? message;
+    if (lvl === 'error' || lvl === 3) report.errors.push(msg);
+  });
+  await new Promise((resolve) => {
+    win.webContents.once('did-finish-load', resolve);
+    win.webContents.once('did-fail-load', (_e, code, desc) => { report.errors.push(`load failed: ${code} ${desc}`); resolve(); });
+  });
+  for (let i = 0; i < 50; i++) {
+    report.page = await win.webContents.executeJavaScript(`({
+      rendered: (document.getElementById('root')?.children.length || 0) > 0,
+      bridge: typeof window.electronAPI === 'object' && typeof window.electronAPI.startScan === 'function',
+      nodeHidden: typeof window.require === 'undefined' && typeof window.process === 'undefined',
+      csp: !!document.querySelector('meta[http-equiv="Content-Security-Policy"]'),
+    })`).catch(e => ({ error: e.message }));
+    if (report.page.rendered) break;
+    await new Promise(r => setTimeout(r, 100));
+  }
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dff-smoke-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'a.jpg'), 'same bytes');
+    fs.writeFileSync(path.join(dir, 'a copy.jpg'), 'same bytes');
+    fs.writeFileSync(path.join(dir, 'b.jpg'), 'different');
+    report.scan = await new Promise((resolve) => {
+      const w = new Worker(WORKER_PATH, { workerData: { mode: 'simple', protectedFolders: [], targetFolders: [dir], filters: {}, exclusions: [], confidence: 'thorough', cachePath: null, platform: process.platform } });
+      w.on('message', (m) => { if (m.type === 'done' || m.type === 'error') { resolve(m.type === 'done' ? { groups: m.result.groups.length, files: m.result.totalScanned } : { error: m.message }); w.terminate(); } });
+      w.on('error', (e) => resolve({ error: e.message }));
+    });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  const ok = !!(report.page && report.page.rendered && report.page.bridge && report.page.nodeHidden
+    && (isDev || report.page.csp) && report.scan && report.scan.groups === 1 && report.errors.length === 0);
+  console.log('[smoke] ' + JSON.stringify(report));
+  console.log(`[smoke] ${ok ? 'PASS' : 'FAIL'}`);
+  // Packaged Windows builds are GUI programs with no console; DFF_SMOKE_OUT
+  // gives CI a file to read instead.
+  if (process.env.DFF_SMOKE_OUT) fs.writeFileSync(process.env.DFF_SMOKE_OUT, JSON.stringify({ ok, ...report }, null, 2));
+  return ok;
+}
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
@@ -186,7 +245,7 @@ handle('scan:start', async (event, opts) => {
       activeWorker = null;
     }
 
-    const worker = new Worker(path.join(__dirname, 'scanWorker.js'), {
+    const worker = new Worker(WORKER_PATH, {
       workerData: {
         mode: opts.mode,
         protectedFolders: opts.protectedFolders || [],

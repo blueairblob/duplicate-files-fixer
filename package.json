@@ -7,25 +7,43 @@
     "dev:renderer": "vite",
     "dev:electron": "cross-env NODE_ENV=development UV_THREADPOOL_SIZE=64 electron .",
     "dev": "concurrently \"npm run dev:renderer\" \"wait-on http://localhost:5173 && npm run dev:electron\"",
+    "test": "vitest run",
+    "build:renderer": "vite build",
+    "smoke": "vite build && cross-env DFF_SMOKE=1 UV_THREADPOOL_SIZE=64 electron .",
+    "pack": "vite build && electron-builder --dir",
     "build": "vite build && electron-builder",
-    "preview": "vite preview",
-    "test": "vitest run"
+    "icon": "node tools/make-icon.js",
+    "preview": "vite preview"
   },
   "build": {
     "appId": "com.dff.prototype",
     "productName": "Duplicate Files Fixer",
     "directories": {
-      "output": "release"
-    },
-    "win": {
-      "target": "nsis",
-      "icon": "public/icon.png"
+      "output": "release",
+      "buildResources": "build"
     },
     "files": [
       "dist/**/*",
       "src/main/**/*",
       "package.json"
-    ]
+    ],
+    "asarUnpack": [
+      "src/main/**/*"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.png"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "build/icon.png",
+      "category": "public.app-category.utilities"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "build/icon.png",
+      "category": "Utility"
+    }
   },
   "keywords": [],
   "author": "",
