@@ -34,7 +34,12 @@ Three process layers:
 - **Scan lifecycle lives in `App.jsx`, not `ScanView`.** The user can navigate away mid-scan; `ScanView` only renders `scan.progress`. `runIdRef` invalidates stale completions after cancel/re-scan. View routing is a `view` state machine (`home` | `scanning` | `results` | `verify` | `done`) plus a sidebar `section` when on home.
 - **Compare results route through `CompareView` first** (when `result.census` exists). It drills down into `ResultsView` with a scoped file selection. Simple-mode results go straight to `ResultsView`.
 - **Demo mode:** when `window.electronAPI` is absent (plain browser via `npm run dev:renderer`), `App.jsx` fakes scan progress and results.
-- **Delete safety chain** (`files:delete` in main.js): payload is `{ files: [{ path, counterpart }], verify }` (a bare path array is legacy). With `verify`, each file is full-hashed against its kept counterpart right before deletion; mismatches are skipped. Then `shell.trashItem` -> fallback move to `~/.dff-quarantine/` with `manifest.json` -> permanent delete only as last resort. Protected (compare-source) files must never become selectable for deletion; the no-survivor guard requires acknowledgement before removing every copy in a group.
+- **Delete safety chain** (all decided in main; the renderer only sends paths via `files:delete`):
+  - `roots.js` blocks overlapping/aliased roots at scan start (also via `scan:checkRoots` from Home) and gives the worker protected subtrees to skip. The worker dedupes files by `dev:ino` identity.
+  - `deleteGuard.js` keeps a session built from the last completed scan. It allows only non-protected group members outside protected roots, and keeps a survivor unless `allowNoSurvivor`.
+  - `deleteFiles.js` re-checks each file (unchanged since scan, kept copy present and a different physical file, content hash below Thorough or when the kept copy changed). It then routes to `shell.trashItem` (local paths only) or `quarantine.js`.
+  - `quarantine.js` moves files into `<volume>/.dff-quarantine` (then scan root, then home), same-volume only. It keeps an append-only `manifest.jsonl`; known folders are listed in `userData/dff-quarantine-dirs.json`.
+  - **Nothing is ever permanently deleted**: if no route works, the file is reported as not deleted.
 - **Signature cache:** `userData/dff-signature-cache.json`, keyed on path + size + mtime. Written by the worker, reused by delete-time verification.
 - **Persistence:** exclusions are in-memory in main (defaults in `exclusions.js`). Scan history (`utils/scanHistory.js`) and theme (`utils/theme.js`) use renderer `localStorage`.
 - **Styling:** design tokens as CSS variables in `index.css` (light/dark via `data-theme`). HiDPI scaling via `useDPR` / `DPRContext`; use its `scale(px)` for inline sizes authored at the 13px/1.0 baseline.
@@ -47,8 +52,12 @@ Three process layers:
 
 ## Tests
 
-Vitest, `node` environment, only `src/tests/**/*.test.js`. Only `exclusions.test.js` imports real source. `scanLogic`, `twoPassScan`, `folderBrowserPaths` and `useDPR` tests **re-implement** the logic inline, so they will not catch changes to `scanWorker.js`, `main.js` or `useDPR.js`. Update the copies by hand when changing that logic. The worker, quarantine fallback and cancellation have no automated coverage.
+Vitest, `node` environment, only `src/tests/**/*.test.js`. `node_modules` is a Windows install: from WSL, run tests through Windows Node with `cmd.exe /c "npx vitest run"`, and never run `npm install` inside WSL on this folder.
+
+Tests that import real source: `exclusions`, `roots`, `deleteSafety` (guard, executor, quarantine on temp folders) and `scanWorker` (spawns the real worker on temp trees). Tests must not touch real volume roots; pass `dirs` to `quarantineFile`.
+
+`scanLogic`, `twoPassScan`, `folderBrowserPaths` and `useDPR` tests **re-implement** the logic inline, so they won't catch changes to the real code. `main.js` itself (Electron wiring) and cancellation have no automated coverage.
 
 ## Known doc drift
 
-The README project-structure section is stale: `LocationPicker.jsx` was removed (replaced by `FolderBrowserModal.jsx`), and `CompareView`, `HistoryView`, `SettingsView`, `Sidebar` and `ScanOptionsSheet` are not listed. The header comment in `scanWorker.js` says "first+last 64 KB", but the code reads the head only.
+`REVIEW.md` holds the full review and the phased fix plan (Phase A, data safety, is done on branch `phase-a-safety`). The README project-structure section is stale: `LocationPicker.jsx` was removed (replaced by `FolderBrowserModal.jsx`), and `CompareView`, `HistoryView`, `SettingsView`, `Sidebar` and `ScanOptionsSheet` are not listed. The header comment in `scanWorker.js` says "first+last 64 KB", but the code reads the head only.

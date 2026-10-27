@@ -244,3 +244,31 @@ What "technical success" should mean for this tool, and how to measure it:
 - Scheduled verify runs.
 - Hard-link instead of delete as a space-saving option on the same volume.
 - Perceptual image matching (needs the worker refactor and a pool of workers).
+
+---
+
+## Phase A — status and manual checks
+
+Phase A is implemented on branch `phase-a-safety` (122 automated tests passing). Each finding is handled as follows:
+- **C2:** no permanent-delete path remains.
+- **C3:** files are deduplicated by identity, and deletes are re-checked by identity.
+- **C4:** overlapping roots are blocked or skipped, and the main-process guard enforces the protected-file rule.
+- **H2:** every delete is re-checked against the scan.
+- **H6:** the quarantine manifest is append-only and stored per volume.
+- **H7:** the Done screen reports what actually happened.
+- **M1:** the main process owns delete decisions.
+
+Phase B fixes are still open, including **C1** (Verify direction) and **C5** (file-type allowlist).
+
+These checks need a real Windows desktop and NAS, and can't be automated. Use a throwaway NAS folder with copied files only. Start the app with `npm run dev` from a Windows terminal.
+
+1. **Mapped drive vs UNC (C3).** Compare with protected `\\nas\share\dff-test` and target `Z:\dff-test` (the same folder through the mapped drive). Expected: the scan is refused with "the same folder".
+2. **Overlap (C4).** Use protected `Z:\dff-test\keep` and target `Z:\dff-test`. Expected: the scan runs, and no file under `keep` appears as deletable. Then swap the two. Expected: the scan is refused.
+3. **NAS delete goes to quarantine (C2).** Compare a local folder against `Z:\dff-test\dupes` and delete a few duplicates. Expected:
+   - the Done screen says they were moved to a `.dff-quarantine` folder;
+   - `Z:\.dff-quarantine` contains the files and a `manifest.jsonl`.
+4. **Restore.** Open Quarantine in the sidebar and restore one file. Expected: it reappears at its original path.
+5. **Changed since scan (H2).** Scan, then edit one target duplicate in another app (so its mtime changes), then delete it. Expected: "File changed since the scan — not deleted".
+6. **Kept copy gone (H2).** Scan, then rename the protected copy, then delete its duplicate. Expected: "The kept copy is missing — not deleted".
+7. **Every copy selected.** Simple scan, select every copy of one group, and delete without ticking the acknowledgement. Expected: the Delete button is disabled. With the acknowledgement ticked, the files go to the Recycle Bin or quarantine, never a permanent delete.
+8. **Local delete.** Delete a duplicate on a local drive. Expected: it appears in the Windows Recycle Bin.
