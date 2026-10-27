@@ -11,7 +11,10 @@ Electron + React (Vite) desktop app that finds and safely deletes duplicate file
 ```bash
 npm install            # .npmrc sets legacy-peer-deps=true on purpose (plugin-react peer range predates Vite 8)
 npm run dev            # Vite on :5173 + Electron (NODE_ENV=development, UV_THREADPOOL_SIZE=64)
-npm run build          # vite build -> dist/, then electron-builder -> release/ (Windows NSIS)
+npm run build          # vite build -> dist/, then electron-builder -> release/ (NSIS / dmg / AppImage)
+npm run pack           # packaged app, unpacked, no installer
+npm run smoke          # vite build + Electron with DFF_SMOKE=1: hidden window, render + scan check, exit 0/1
+node tools/run-smoke.js                          # smoke-test a packaged app (DFF_RELEASE_DIR overrides release/)
 npm test                                         # all tests (vitest run)
 npx vitest run src/tests/exclusions.test.js      # single file
 npx vitest run -t "glob"                         # tests matching a name
@@ -29,6 +32,14 @@ Three process layers:
 1. **Main process** (`src/main/main.js`, CommonJS): window creation, all `ipcMain` handlers (folder dialogs, platform-specific location detection for Windows/macOS/Linux/WSL, directory listing, exclusions, delete/quarantine/restore, signature cache info/clear). Spawns one scan worker per scan and forwards its messages to the renderer as `scan:progress`.
 2. **Scan worker** (`src/main/scanWorker.js`, `worker_threads`): all scanning. Config arrives via `workerData`; messages out are `progress` / `done` / `cancelled` / `error`; message in is `cancel`. Pipeline: async walk (stat only) -> group by size -> 64 KB head-only "boundary" hash -> full SHA-256 for remaining collisions. `confidence` (`quick` | `standard` | `thorough`) controls how far down that pipeline it goes. Modes: `simple`, `compare` (protected source vs target; produces a `census` of in-both / source-only / target-only / unreadable), `verify` (is every **source** = `protectedFolders` file present in the **backup** = `targetFolders`?). The worker only does I/O; the decisions (type filter, grouping, auto-mark, census, verify report) live in pure `scanCore.js`. With no type filter every file is scanned.
 3. **Renderer** (`src/renderer/`, ESM React 18): talks to main only through `window.electronAPI` from `src/main/preload.js`. Adding an IPC call means touching main.js handler + preload.js bridge + caller.
+
+### Security rules (security.js)
+
+- **Register IPC with `handle()` / `on()` in main.js, never `ipcMain.handle` directly.** The wrappers reject calls that don't come from the app's own page.
+- The renderer is `sandbox: true`, so `preload.js` may only `require('electron')`.
+- Production builds get the CSP from `vite.config.js` (`security.CSP`). Don't add inline scripts or remote resources.
+- Navigation, pop-ups, webviews and permissions are blocked for every web contents.
+- Packaging: `src/main` is in `asarUnpack`, and the worker loads from `app.asar.unpacked` (`WORKER_PATH`). Keep anything the worker `require`s inside `src/main`.
 
 ### Key cross-file behaviors
 
@@ -63,4 +74,4 @@ Every suite imports real source: `scanCore`, `scanWorker` (spawns the real worke
 
 ## Plans
 
-`REVIEW.md` holds the full review and the phased fix plan, with status notes at the end (Phases A–B merged to `main`; Phase C on `phase-c-scale`). `PLAN.md` is the original sprint plan and predates REVIEW.md.
+`REVIEW.md` holds the full review and the phased fix plan, with status notes at the end (Phases A–C merged to `main`; Phase D on `phase-d-ship`). `PLAN.md` is the original sprint plan and predates REVIEW.md.

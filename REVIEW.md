@@ -327,3 +327,36 @@ Done on branch `phase-c-scale`:
 Not done, deliberately:
 - **Results held in main and paged to the screen.** The worker still posts every group in one message. That is fine for tens of thousands of groups; revisit if real scans hit memory limits.
 - **SQLite signature cache.** `better-sqlite3` is a native module that must be rebuilt for each Electron version, which adds packaging risk. The JSON cache plus the `.meta.json` sidecar removes the main-process cost. The worker still parses the whole cache once per scan. Revisit with a measured cache over ~200k entries.
+
+---
+
+## Phase D — status
+
+Done on branch `phase-d-ship`:
+- **M2 (Electron hardening):**
+  - `sandbox: true`, and no webview tag.
+  - Strict CSP on the production page.
+  - Navigation, redirects, pop-ups, webviews and permission requests are blocked.
+  - Every IPC handler rejects calls that don't come from the app page.
+  - `security.js` is unit-tested.
+- **H10 (packaging):**
+  - Generated icon (`build/icon.png`).
+  - `src/main` is unpacked from asar, so the worker loads in packaged builds.
+  - dmg and AppImage targets added.
+  - Verified on Windows: the packaged app passes the smoke test, and the NSIS installer builds (unsigned).
+- **Smoke mode:** `DFF_SMOKE=1` and `tools/run-smoke.js` check, without showing a window, that the page renders under the sandbox and CSP, the preload bridge works, Node is hidden from the page, and the worker finds a duplicate.
+- **CI:** `.github/workflows/ci.yml` runs tests, a package and the smoke test on Windows, macOS and Linux. **It has not run yet**; it starts on the first push to GitHub.
+- **Low items:**
+  - A superseded scan's promise now resolves.
+  - Only one worker error handler remains.
+  - The window background follows the OS theme.
+  - Home shows the exclusion count.
+  - Scoped Auto-select stays inside the selected folders.
+
+Still open (each needs a decision or an account from you):
+- **Code signing:** a Windows certificate, and the Apple Developer Program for notarisation.
+- **Auto-update:** `electron-updater` needs somewhere to publish releases, such as GitHub Releases.
+- **Opt-in crash reporting:** for example Sentry, which needs an account and a privacy decision.
+- **Licensing:** free/pro tiers (PLAN.md Sprint 5).
+- **HiDPI scaling design:** text shrinks on high-DPI screens and with Ctrl+zoom. This is a UX decision, not a bug fix.
+- **macOS:** builds aren't verified on real hardware; CI covers the build and smoke test only.
