@@ -28,9 +28,41 @@ function typeIconFor(ext) {
 
 const CONFIDENCE_LABELS = { quick: 'Quick match', standard: 'Standard match', thorough: 'Thorough match' };
 
+// Zero-byte files (shown when "include empty files" is on). They hold no data,
+// so they're listed for reference only and never content-matched.
+function EmptyFilesCard({ files, scale }) {
+  const [open, setOpen] = useState(false);
+  if (!files || files.length === 0) return null;
+  const shown = files.slice(0, 300);
+  return (
+    <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', marginTop: scale(6), overflow: 'hidden', width: '100%' }}>
+      <button onClick={() => setOpen(v => !v)} style={{ width: '100%', textAlign: 'left', background: 'transparent', padding: `${scale(10)}px ${scale(14)}px`, display: 'flex', alignItems: 'center', gap: scale(8) }}>
+        <span style={{ fontSize: 'var(--fs-secondary)', color: 'var(--text-primary)', flex: 1 }}>
+          {files.length.toLocaleString()} empty file{files.length !== 1 ? 's' : ''} (0 bytes) — listed for reference, not deleted
+        </span>
+        {open ? <ChevronDownIcon size={scale(14)} color="var(--text-muted)" /> : <ChevronRightIcon size={scale(14)} color="var(--text-muted)" />}
+      </button>
+      {open && (
+        <div style={{ maxHeight: scale(240), overflowY: 'auto' }}>
+          {shown.map(f => (
+            <div key={f.path} title={f.path} style={{ padding: `${scale(7)}px ${scale(14)}px`, borderTop: '1px solid var(--border)', fontSize: 'var(--fs-caption)', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', direction: 'rtl', textAlign: 'left' }}>
+              {f.path}
+            </div>
+          ))}
+          {files.length > shown.length && (
+            <div style={{ padding: `${scale(7)}px ${scale(14)}px`, borderTop: '1px solid var(--border)', fontSize: 'var(--fs-caption)', color: 'var(--text-muted)' }}>
+              and {(files.length - shown.length).toLocaleString()} more
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, onBack, selection = null, backLabel = null, selectionLabel = null }) {
   const { scale } = useDPR();
-  const { groups: allGroups = [], totalScanned = 0, mode, warnings = [], confidence = 'thorough' } = scanResult;
+  const { groups: allGroups = [], totalScanned = 0, mode, warnings = [], confidence = 'thorough', emptyFiles = [] } = scanResult;
 
   // A selection arriving from the Compare screen scopes this view to the chosen
   // folders and pre-marks exactly those files — the delete path itself is
@@ -160,6 +192,7 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
             {warnings.length} item{warnings.length !== 1 ? 's' : ''} could not be read and {warnings.length !== 1 ? 'were' : 'was'} skipped.
           </p>
         )}
+        {!selSet && <div style={{ width: scale(420), maxWidth: '90%' }}><EmptyFilesCard files={emptyFiles} scale={scale} /></div>}
         <button onClick={onBack} style={{
           background: 'var(--accent)', color: 'var(--on-accent)', borderRadius: 'var(--radius-sm)',
           fontWeight: 500, fontSize: 'var(--fs-body)', padding: `${scale(9)}px ${scale(24)}px`, marginTop: scale(8),
@@ -333,6 +366,8 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
               </div>
             );
           })}
+
+          {!selSet && <EmptyFilesCard files={emptyFiles} scale={scale} />}
 
           {/* Skipped-during-scan warnings */}
           {warnings.length > 0 && (

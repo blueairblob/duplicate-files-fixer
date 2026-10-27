@@ -12,7 +12,7 @@ Electron + React (Vite) desktop app that finds and safely deletes duplicate file
 npm install            # .npmrc sets legacy-peer-deps=true on purpose (plugin-react peer range predates Vite 8)
 npm run dev            # Vite on :5173 + Electron (NODE_ENV=development, UV_THREADPOOL_SIZE=64)
 npm run build          # vite build -> dist/, then electron-builder -> release/ (Windows NSIS)
-npx vitest run                                   # all tests (no `npm test` script exists)
+npm test                                         # all tests (vitest run)
 npx vitest run src/tests/exclusions.test.js      # single file
 npx vitest run -t "glob"                         # tests matching a name
 DFF_PERF=1 npm run dev                           # verbose per-phase/per-file scan timings
@@ -26,7 +26,7 @@ Requires Node 20.12+ (Vite 8 needs `util.styleText`; Node 18 crashes). On Window
 Three process layers:
 
 1. **Main process** (`src/main/main.js`, CommonJS): window creation, all `ipcMain` handlers (folder dialogs, platform-specific location detection for Windows/macOS/Linux/WSL, directory listing, exclusions, delete/quarantine/restore, signature cache info/clear). Spawns one scan worker per scan and forwards its messages to the renderer as `scan:progress`.
-2. **Scan worker** (`src/main/scanWorker.js`, `worker_threads`): all scanning. Config arrives via `workerData`; messages out are `progress` / `done` / `cancelled` / `error`; message in is `cancel`. Pipeline: async walk (stat only) -> group by size -> 64 KB head-only "boundary" hash -> full SHA-256 for remaining collisions. `confidence` (`quick` | `standard` | `thorough`) controls how far down that pipeline it goes. Modes: `simple`, `compare` (protected source vs target; produces a `census` of in-both / source-only / target-only), `verify` (backup coverage).
+2. **Scan worker** (`src/main/scanWorker.js`, `worker_threads`): all scanning. Config arrives via `workerData`; messages out are `progress` / `done` / `cancelled` / `error`; message in is `cancel`. Pipeline: async walk (stat only) -> group by size -> 64 KB head-only "boundary" hash -> full SHA-256 for remaining collisions. `confidence` (`quick` | `standard` | `thorough`) controls how far down that pipeline it goes. Modes: `simple`, `compare` (protected source vs target; produces a `census` of in-both / source-only / target-only / unreadable), `verify` (is every **source** = `protectedFolders` file present in the **backup** = `targetFolders`?). The worker only does I/O; the decisions (type filter, grouping, auto-mark, census, verify report) live in pure `scanCore.js`. With no type filter every file is scanned.
 3. **Renderer** (`src/renderer/`, ESM React 18): talks to main only through `window.electronAPI` from `src/main/preload.js`. Adding an IPC call means touching main.js handler + preload.js bridge + caller.
 
 ### Key cross-file behaviors
@@ -54,10 +54,8 @@ Three process layers:
 
 Vitest, `node` environment, only `src/tests/**/*.test.js`. `node_modules` is a Windows install: from WSL, run tests through Windows Node with `cmd.exe /c "npx vitest run"`, and never run `npm install` inside WSL on this folder.
 
-Tests that import real source: `exclusions`, `roots`, `deleteSafety` (guard, executor, quarantine on temp folders) and `scanWorker` (spawns the real worker on temp trees). Tests must not touch real volume roots; pass `dirs` to `quarantineFile`.
+Every suite imports real source: `scanCore`, `scanWorker` (spawns the real worker on temp trees), `roots`, `deleteSafety` (guard, executor, quarantine on temp folders), `exclusions`, `useDPR`. Tests must not touch real volume roots; pass `dirs` to `quarantineFile`. `main.js` IPC wiring and cancellation have no automated coverage. `tools/phase-a-check.js` exercises the delete path against a real share inside Electron (from WSL: `cmd.exe /c 'npx electron tools\phase-a-check.js Z:\ \\server\share'`, single quotes).
 
-`scanLogic`, `twoPassScan`, `folderBrowserPaths` and `useDPR` tests **re-implement** the logic inline, so they won't catch changes to the real code. `main.js` itself (Electron wiring) and cancellation have no automated coverage.
+## Plans
 
-## Known doc drift
-
-`REVIEW.md` holds the full review and the phased fix plan (Phase A, data safety, is done on branch `phase-a-safety`). The README project-structure section is stale: `LocationPicker.jsx` was removed (replaced by `FolderBrowserModal.jsx`), and `CompareView`, `HistoryView`, `SettingsView`, `Sidebar` and `ScanOptionsSheet` are not listed. The header comment in `scanWorker.js` says "first+last 64 KB", but the code reads the head only.
+`REVIEW.md` holds the full review and the phased fix plan, with status notes at the end (Phase A merged to `main`; Phase B on `phase-b-verdicts`). `PLAN.md` is the original sprint plan and predates REVIEW.md.

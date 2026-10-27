@@ -3,7 +3,7 @@
 A working Electron + React prototype covering the core features from the PRD (see `PLAN.md`).
 
 - Folder selection (browse, location picker, or drag-and-drop)
-- File type and size filters
+- File type and size filters — with no type picked, **every** file is scanned (RAW photos, TIFFs, anything)
 - **Compare summary** — a scan lands on a summary of the *relationship* between the two folders, not a wall of file rows: totals for each side, how many files exist in both, what's only in the source, and what's only in the target. Every figure drills down.
 - **Folder-level decisions** — folders that are fully duplicated collapse into a single row you can select in one click; folders that are only *partly* duplicated are surfaced first, because that's where judgement is actually needed. Selecting a partial folder marks only its duplicated files, never the ones that exist nowhere else.
 - **Backup-gap detection** — files present in the target but nowhere in the protected source are reported separately. These are the files that are *not* backed up.
@@ -11,21 +11,22 @@ A working Electron + React prototype covering the core features from the PRD (se
   - *Quick* — name and size only, no file contents read. Fastest; cannot detect renamed copies.
   - *Standard* (default) — 64 KB head hash. Good balance; the recommended setting for network drives.
   - *Thorough* — full SHA-256 of every candidate, byte-for-byte proof of identity.
-- **Verify on delete** — for Quick and Standard scans, each file is hashed and compared against the copy being kept *at the moment of deletion*. Any mismatch is skipped and reported rather than deleted.
+- **Checked at delete time** — every file is re-checked against the scan and against the copy being kept just before it's removed: it must be unchanged, the kept copy must still exist and be a different physical file, and for Quick/Standard scans (or when the kept copy changed) the two are compared byte-for-byte. Anything that fails is skipped and reported.
 - **Signature cache** — file hashes are remembered between scans (keyed on path, size and mtime), so repeat scans of the same tree run at walk speed. Clearable from Settings.
 - **Concurrent worker-thread scanning** — the scan runs off the UI thread using async I/O through a bounded concurrency pool (default 32 in flight, with a per-drive cap). This hides per-file latency on NAS/network drives and keeps the worker responsive, so progress keeps flowing and Cancel takes effect immediately mid-walk.
 - **Three scan modes:**
   - *Simple* — find duplicates within one or more folders
   - *Compare* — protected source vs. scan target, with shield badges on protected files (never selectable for deletion)
-  - *Verify* — check that every file on a target (e.g. desktop) is backed up on a protected location (e.g. NAS); reports backed-up / not-on-NAS / NAS-only
+  - *Verify* — check that every file in the **source** (your originals) has a copy somewhere in the **backup**; reports missing-from-backup / backed-up / only-in-backup / couldn't-read. Defaults to a Thorough (byte-for-byte) scan.
 - Auto-mark rules: protected-wins, keep-newest, keep-oldest, keep-largest
 - **No-survivor guard** — deleting *every* copy in a group requires explicit acknowledgement, so you can't accidentally erase the last copy of a file
 - **Exclusion list** — pre-populated defaults (`node_modules`, `.git`, system folders, cloud sync caches), editable in-app
-- **Zero-byte file detection** — grouped separately from content duplicates
+- **Zero-byte file detection** — listed separately from content duplicates (for reference; not deleted)
 - **Scan warnings panel** — permission errors, locked files, etc. surfaced instead of silently skipped
 - Manual selection override, Select All / Deselect All
-- Confirm → delete to the **system Recycle Bin**, with a **quarantine fallback**: if the OS trash can't be reached (common on Linux/WSL), files move to an in-app quarantine folder (`~/.dff-quarantine/`) with a recovery manifest instead of being lost
-- **Recovery panel** — browse the in-app quarantine and restore files back to their original location
+- Confirm → delete to the **system Recycle Bin**, with a **quarantine fallback**: network drives (which have no Recycle Bin) and systems where the OS trash can't be reached use a `.dff-quarantine` folder on the **same drive** as the file. **Nothing is ever permanently deleted** — if neither works, the file is left in place and reported.
+- **Safety rules enforced in the main process** — protected files, overlapping folders (e.g. protected `D:\Photos` inside target `D:\`) and one folder reached by two paths (a mapped drive and its `\\nas` path) can never lead to deleting the only copy.
+- **Recovery panel** — browse every quarantine folder the app has used and restore files to their original location
 - Post-deletion summary screen
 
 ---
@@ -88,11 +89,20 @@ Notes:
 npx vitest run
 ```
 
-Unit suites live in `src/tests/` and cover file-inclusion filters and auto-mark rules (`scanLogic`), exclusion matching by name/glob/path-prefix (`exclusions`), and the size-grouping that makes scanning fast (`twoPassScan`), among others.
+(or `npm test`). Suites in `src/tests/` import the real modules:
+- `scanCore`: type filters, grouping, auto-mark rules, census and the Verify report.
+- `scanWorker`: runs the real worker thread against temp folders.
+- `roots`: overlapping and aliased folders.
+- `deleteSafety`: the delete guard, the delete checks, and quarantine/restore on temp folders.
+- `exclusions` and `useDPR`.
 
-> There is no `npm test` script wired up; use `npx vitest run` (add `"test": "vitest run"` to `package.json` if you want `npm test`).
+To check the delete path against a real network share and the Recycle Bin (Windows):
 
-The scan worker, quarantine fallback, and cancellation signal are additionally verified with live smoke tests against a real file tree (not part of the automated suite, since they need actual disk I/O and a worker thread).
+```bash
+npx electron tools/phase-a-check.js Z:\ \\server\share
+```
+
+It creates and removes its own test folder on the share.
 
 ---
 
@@ -101,26 +111,37 @@ The scan worker, quarantine fallback, and cancellation signal are additionally v
 ```
 ├── src/
 │   ├── main/
-│   │   ├── main.js          ← Electron main process: IPC, worker lifecycle, delete/quarantine/restore
+│   │   ├── main.js          ← Electron main process: window, IPC, worker lifecycle
 │   │   ├── preload.js       ← Secure IPC bridge to renderer
-│   │   ├── scanWorker.js    ← Runs in worker_threads — async concurrent three-pass SHA-256 scan, cancellable
+│   │   ├── scanWorker.js    ← Runs in worker_threads — async concurrent walk + hashing, cancellable
+│   │   ├── scanCore.js      ← Pure scan decisions: filters, groups, census, Verify report
+│   │   ├── roots.js         ← Overlapping / aliased scan-root checks
+│   │   ├── system.js        ← OS lookups: mapped drives, real paths
+│   │   ├── deleteGuard.js   ← Which files may be deleted (checked against the last scan)
+│   │   ├── deleteFiles.js   ← Per-file checks + Recycle Bin / quarantine routing
+│   │   ├── deleteService.js ← Delete/quarantine/restore wiring used by main.js
+│   │   ├── quarantine.js    ← Same-drive quarantine with an append-only manifest
 │   │   └── exclusions.js    ← Pure exclusion-matching logic (name/glob/path-prefix)
 │   └── renderer/
 │       ├── main.jsx         ← React entry point (StrictMode)
 │       ├── App.jsx          ← View state machine
 │       ├── index.css        ← Design tokens + global styles
 │       ├── components/
-│       │   ├── TitleBar.jsx
-│       │   ├── LocationPicker.jsx       ← Home/Documents/Drives/Network browser
+│       │   ├── TitleBar.jsx / Sidebar.jsx
+│       │   ├── FolderBrowserModal.jsx   ← Locations (drives, network) + native folder picker
+│       │   ├── ScanOptionsSheet.jsx     ← Types, size, match confidence, auto-mark rule
 │       │   └── ExclusionListPanel.jsx   ← Editable exclusion list UI
 │       └── views/
 │           ├── HomeView.jsx           ← Mode select, folder zones, filters, exclusions, recovery entry
 │           ├── ScanView.jsx           ← Live progress (walk → hash → verify), real cancel
+│           ├── CompareView.jsx        ← Compare summary: source vs target, folder-level selection
 │           ├── ResultsView.jsx        ← Duplicate groups, shield badges, warnings, no-survivor guard
 │           ├── VerifyResultsView.jsx  ← Backup-coverage report for Verify mode
 │           ├── RecoveryView.jsx       ← Browse + restore in-app quarantine
-│           └── DoneView.jsx           ← Summary, quarantine notice if trash fallback used
-├── src/tests/                ← Vitest unit tests
+│           ├── HistoryView.jsx / SettingsView.jsx
+│           └── DoneView.jsx           ← What was recycled, quarantined or left in place
+├── src/tests/                ← Vitest suites
+├── tools/                    ← bench-smb.js (SMB throughput), phase-a-check.js (NAS delete check)
 ├── index.html                ← Vite entry
 ├── vite.config.js
 └── package.json
@@ -133,10 +154,10 @@ The scan worker, quarantine fallback, and cancellation signal are additionally v
 Deletion tries three routes, in order:
 
 1. **System Recycle Bin** (`shell.trashItem`) — the normal path on Windows/macOS. Recover these the usual way, from the OS Recycle Bin / Trash on your desktop.
-2. **In-app quarantine** — used only when the OS trash can't be reached. Files move to `~/.dff-quarantine/` with a manifest. Browse and restore them from the **Recover deleted files** panel on the home screen. Restore refuses to overwrite a file that has since reappeared at the original path, and recreates the parent folder if it was removed.
-3. **Permanent delete** — last resort only, if both of the above fail.
+2. **Same-drive quarantine** — used for network drives (the Windows Recycle Bin refuses them) and whenever the OS trash can't be reached. Files are moved (never copied across drives) into `.dff-quarantine` at the top of the file's drive. If that isn't writable, the app tries the scan folder and then your home folder, as long as it's on the same drive. Each folder keeps an append-only `manifest.jsonl`. Browse and restore from **Quarantine** in the sidebar. Restore refuses to overwrite a file that has since reappeared at the original path, and recreates the parent folder if it was removed.
+3. **Left in place** — if neither works, the file is not deleted and the Done screen says why. There is no permanent-delete fallback.
 
-The Recovery panel shows the in-app quarantine only — not the system Recycle Bin. On native Windows the panel is usually empty, because deletes succeed to the Recycle Bin.
+The Quarantine panel shows the app's quarantine folders only — not the system Recycle Bin.
 
 ---
 
@@ -152,16 +173,16 @@ The Recovery panel shows the in-app quarantine only — not the system Recycle B
 | Location picker | ✅ Home/Documents/Drives/USB/Network, cross-platform |
 | Simple mode | ✅ Find duplicates within folders |
 | Compare mode (protected vs target) | ✅ Shield badges, protected files never selectable |
-| Verify mode (backup coverage) | ✅ Backed-up / not-on-NAS / NAS-only report |
+| Verify mode (backup coverage) | ✅ Missing-from-backup / backed-up / backup-only / unreadable |
 | Auto-mark rules | ✅ 4 rules incl. protected-wins |
 | No-survivor guard | ✅ Explicit acknowledgement before erasing a group's last copy |
 | Exclusion list | ✅ Editable, pre-populated defaults |
-| Zero-byte file detection | ✅ Separate grouping |
+| Zero-byte file detection | ✅ Listed separately |
 | Scan error surfacing | ✅ Warnings panel |
 | Grouped results display | ✅ Collapsible groups |
 | Manual override | ✅ Click to toggle |
 | Confirm before delete | ✅ Modal dialog |
-| Safe deletion | ✅ Recycle Bin, with quarantine fallback + manifest |
+| Safe deletion | ✅ Recycle Bin or same-drive quarantine; never permanent |
 | Recover deleted files | ✅ In-app quarantine browse + restore |
 | Post-deletion summary | ✅ Animated counter + stats |
 

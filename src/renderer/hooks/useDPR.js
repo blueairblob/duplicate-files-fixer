@@ -5,16 +5,16 @@ import { useEffect, useState, useCallback } from 'react';
 // scale() helper multiplies every other design value by, so a single source of
 // truth (base font px) drives both the global body font-size and every inline
 // fontSize/padding/gap/radius value across the app.
-const REFERENCE_FONT = 13; // the "1.0 / standard 1080p" baseline every component was authored against
+export const REFERENCE_FONT = 13; // the "1.0 / standard 1080p" baseline every component was authored against
 
-const DPR_TIERS = [
+export const DPR_TIERS = [
   { max: 1.0,  dpr: 1.0,  baseFont: 13, label: 'Standard 1080p' },
   { max: 1.25, dpr: 1.25, baseFont: 12, label: '125% Windows scaling' },
   { max: 1.5,  dpr: 1.5,  baseFont: 11, label: '150% / 2K screens' },
   { max: Infinity, dpr: 2.0, baseFont: 10, label: 'Retina / 4K' },
 ];
 
-function resolveTier(dpr) {
+export function resolveTier(dpr) {
   // devicePixelRatio in the renderer reflects OS scaling directly (1.0, 1.25, 1.5,
   // 1.75, 2.0, ...). Each tier's `max` is an upper bound, so a dpr is bucketed
   // into the first tier whose ceiling it doesn't exceed (e.g. 1.1 -> 1.25 tier,
@@ -24,6 +24,12 @@ function resolveTier(dpr) {
   if (dpr <= 1.25) return DPR_TIERS[1];
   if (dpr <= 1.5) return DPR_TIERS[2];
   return DPR_TIERS[3];
+}
+
+// Pure scale() for a given devicePixelRatio — what the hook returns.
+export function makeScale(dpr) {
+  const factor = resolveTier(dpr).baseFont / REFERENCE_FONT;
+  return (px) => Math.round(px * factor * 100) / 100;
 }
 
 /**

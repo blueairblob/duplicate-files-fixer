@@ -1,30 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import { DPR_TIERS, resolveTier, makeScale } from '../renderer/hooks/useDPR.js';
 
-// Pure re-implementation of the tier-resolution and scale() logic from
-// useDPR.js, extracted here for fast, dependency-free testing (no DOM/React
-// rendering required — mirrors the pattern used in folderBrowserPaths.test.js).
-
-const REFERENCE_FONT = 13;
-
-const DPR_TIERS = [
-  { max: 1.0,  dpr: 1.0,  baseFont: 13, label: 'Standard 1080p' },
-  { max: 1.25, dpr: 1.25, baseFont: 12, label: '125% Windows scaling' },
-  { max: 1.5,  dpr: 1.5,  baseFont: 11, label: '150% / 2K screens' },
-  { max: Infinity, dpr: 2.0, baseFont: 10, label: 'Retina / 4K' },
-];
-
-function resolveTier(dpr) {
-  if (dpr <= 1.0) return DPR_TIERS[0];
-  if (dpr <= 1.25) return DPR_TIERS[1];
-  if (dpr <= 1.5) return DPR_TIERS[2];
-  return DPR_TIERS[3];
-}
-
-function makeScale(dpr) {
-  const tier = resolveTier(dpr);
-  const factor = tier.baseFont / REFERENCE_FONT;
-  return (px) => Math.round(px * factor * 100) / 100;
-}
+// Tests the real tier table and scale() from useDPR.js.
 
 describe('resolveTier — matches the PLAN.md §3.1 scaling table', () => {
   it('resolves exactly 1.0 to the Standard 1080p tier (13px base)', () => {

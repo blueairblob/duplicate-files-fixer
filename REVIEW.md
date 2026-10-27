@@ -281,3 +281,26 @@ Things learned on the real share:
 - **`shell.trashItem` refuses network files** ("Failed to perform delete operation") and leaves them in place. The old code then tried to rename the file into `C:\Users\…\.dff-quarantine`, which fails across drives, and fell through to `unlinkSync`. **Before Phase A, every NAS delete on Windows was permanent.** This confirms C2.
 - **File identity works on this SMB share.** The mapped `Z:` path and the UNC path report the same `dev:ino`, so the identity dedupe also catches aliases the root check might miss.
 - **The SMB client caches timestamps for about 10 seconds** (`FileInfoCacheLifetime`). A file edited moments before a delete can still show its old mtime. Below Thorough, the content hash catches the edit. In Thorough mode, a same-size edit made in the last ~10 s before deleting the file would not be caught, but the file still goes to quarantine and can be restored. Consider always hashing network files at delete time (Phase C).
+
+---
+
+## Phase B — status
+
+Done on branch `phase-b-verdicts`:
+- **C1:** Verify now answers "is every source file in the backup?". Its buckets are missing, backed up, only in the backup, and couldn't read. The headline only says all is well when nothing is missing and nothing failed to read.
+- **C5:** with no type filter, every file is scanned. The type filters now include RAW, TIFF, HEIF and more.
+- **H3:** Verify defaults to Thorough, with its own saved setting. Standard results are worded "likely backed up", and Quick results "same name and size".
+- **H4:** Quick-mode wording is applied across Compare.
+- **H5:** folder rows are keyed by target root plus path.
+- **H8:** empty files are listed in Results.
+- **H9:** files that couldn't be read get their own bucket.
+- **H1:** folder drag-and-drop uses `webUtils.getPathForFile`.
+- **Tests:** the scan decisions moved into `scanCore.js`, and every suite now imports real code. The copied-logic suites were removed: `scanLogic` and `twoPassScan` were replaced by `scanCore.test.js`, and `folderBrowserPaths` tested code the app no longer uses.
+- **Low items:**
+  - CompareView components are now module-level.
+  - The partial-folder list is capped, with "show more".
+  - Partial rows show matched counts and reclaimable bytes.
+  - "None" folders get an icon.
+  - The doubled border is fixed.
+  - "N more" counts are accurate.
+  - `npm test` is wired up.

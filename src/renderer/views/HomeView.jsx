@@ -26,9 +26,12 @@ function FolderZone({ label, sublabel, Icon, iconColor, folders, onAddPath, onRe
   const handleDrop = (e) => {
     e.preventDefault();
     setDragging(false);
+    // Folders arrive with an empty MIME type. File.path no longer exists
+    // (removed in Electron 32), so ask the preload bridge for the real path.
     const dropped = Array.from(e.dataTransfer.files)
       .filter(f => f.type === '')
-      .map(f => f.path).filter(Boolean);
+      .map(f => { try { return api?.getPathForFile ? api.getPathForFile(f) : ''; } catch { return ''; } })
+      .filter(Boolean);
     if (dropped.length) dropped.forEach(p => onAddPath(p));
   };
 

@@ -1,7 +1,9 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
   openFolder:       (defaultPath) => ipcRenderer.invoke('dialog:openFolder', defaultPath),
+  // File.path was removed in Electron 32; this is the supported replacement.
+  getPathForFile:   (file)   => webUtils.getPathForFile(file),
   getLocations:     ()       => ipcRenderer.invoke('fs:getLocations'),
   listDirectory:    (path)   => ipcRenderer.invoke('fs:listDirectory', path),
 
