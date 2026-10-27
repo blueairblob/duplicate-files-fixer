@@ -28,7 +28,7 @@ const isDev = process.env.NODE_ENV === 'development';
 
 let activeWorker = null;
 let lastSession = null; // deleteGuard session from the last completed scan
-let exclusionList = [...DEFAULT_EXCLUSIONS]; // in-memory for the prototype; Sprint 4 persists this via electron-store
+let exclusionList = null; // loaded from userData on first use; see loadExclusions()
 
 function createWindow() {
   // IMPORTANT: BrowserWindow width/height are specified in DIPs (device-independent
@@ -112,17 +112,34 @@ ipcMain.handle('dialog:saveTextFile', async (_event, defaultName, content) => {
 ipcMain.handle('fs:getLocations', async () => getLocations());
 
 // ── IPC: Exclusion list (in-memory; persisted properly in Sprint 4) ──────────
-ipcMain.handle('exclusions:get', async () => exclusionList);
-
-ipcMain.handle('exclusions:set', async (event, list) => {
-  exclusionList = Array.isArray(list) ? list : exclusionList;
+// Exclusions persist in userData/dff-exclusions.json (written atomically).
+const exclusionsPath = () => path.join(app.getPath('userData'), 'dff-exclusions.json');
+async function loadExclusions() {
+  if (exclusionList) return exclusionList;
+  try {
+    const saved = JSON.parse(await fs.promises.readFile(exclusionsPath(), 'utf8'));
+    exclusionList = Array.isArray(saved) ? saved.filter(x => typeof x === 'string') : [...DEFAULT_EXCLUSIONS];
+  } catch {
+    exclusionList = [...DEFAULT_EXCLUSIONS];
+  }
   return exclusionList;
-});
-
-ipcMain.handle('exclusions:resetDefaults', async () => {
-  exclusionList = [...DEFAULT_EXCLUSIONS];
+}
+async function saveExclusions(list) {
+  exclusionList = list;
+  const tmp = exclusionsPath() + '.tmp';
+  try {
+    await fs.promises.writeFile(tmp, JSON.stringify(list, null, 2));
+    await fs.promises.rename(tmp, exclusionsPath());
+  } catch (e) {
+    console.error('[exclusions] could not save:', e.message);
+  }
   return exclusionList;
-});
+}
+
+ipcMain.handle('exclusions:get', async () => loadExclusions());
+ipcMain.handle('exclusions:set', async (_event, list) =>
+  Array.isArray(list) ? saveExclusions(list.filter(x => typeof x === 'string')) : loadExclusions());
+ipcMain.handle('exclusions:resetDefaults', async () => saveExclusions([...DEFAULT_EXCLUSIONS]));
 
 ipcMain.handle('scan:checkRoots', async (_event, opts) => checkRoots(opts));
 
@@ -139,6 +156,8 @@ ipcMain.handle('scan:start', async (event, opts) => {
     return { groups: [], emptyFiles: [], totalScanned: 0, totalHashed: 0, warnings: [{ path: '-', reason }], error: reason, mode: opts.mode };
   }
 
+  const exclusions = await loadExclusions();
+
   return new Promise((resolve) => {
     if (activeWorker) {
       try { activeWorker.terminate(); } catch {}
@@ -152,7 +171,7 @@ ipcMain.handle('scan:start', async (event, opts) => {
         targetFolders: opts.targetFolders || [],
         filters: opts.filters || {},
         autoMarkRule: opts.autoMarkRule,
-        exclusions: exclusionList,
+        exclusions,
         includeEmpty: !!opts.includeEmpty,
         confidence: opts.confidence, // quick | standard | thorough (worker defaults standard)
         concurrency: opts.concurrency, // undefined → worker defaults to 32

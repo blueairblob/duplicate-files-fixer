@@ -19,7 +19,10 @@ const fs   = require('fs');
 const fsp  = fs.promises;
 const path = require('path');
 const crypto = require('crypto');
-const { isExcluded } = require('./exclusions');
+const { isExcluded, compileExclusions } = require('./exclusions');
+
+// Compiled once per scan; matched only below each scan root.
+const EXCLUSIONS = compileExclusions(workerData.exclusions || []);
 const { normaliseRoot } = require('./roots');
 const { shouldIncludeFile, sizeCandidates, buildGroups, buildCensus, censusProblems, buildVerifyReport } = require('./scanCore');
 
@@ -310,7 +313,7 @@ async function walkCollect(dir, filters, exclusions, label, sourceFiles, warning
   for (const entry of entries) {
     if (cancelled) return;
     const fullPath = path.join(dir, entry.name);
-    if (isExcluded(fullPath, exclusions)) continue;
+    if (isExcluded(fullPath, EXCLUSIONS, root)) continue;
     if (entry.isDirectory() && label === 'target' && ROOT_EXCLUDES.has(normaliseRoot(fullPath, PLATFORM))) continue;
     if (entry.isDirectory())  subdirs.push(fullPath);
     else if (entry.isFile())  files.push({ fullPath, name: entry.name });

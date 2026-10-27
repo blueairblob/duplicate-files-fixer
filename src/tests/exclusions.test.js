@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { DEFAULT_EXCLUSIONS, isExcluded, globToRegExp, normalisePath } from '../main/exclusions.js';
+import { DEFAULT_EXCLUSIONS, isExcluded, compileExclusions, globToRegExp, normalisePath } from '../main/exclusions.js';
 
 describe('normalisePath', () => {
   it('converts backslashes to forward slashes', () => {
@@ -100,5 +100,44 @@ describe('DEFAULT_EXCLUSIONS', () => {
     expect(isExcluded('/home/dev/myapp/node_modules/react/index.js', DEFAULT_EXCLUSIONS)).toBe(true);
     expect(isExcluded('/home/dev/myapp/.git/config', DEFAULT_EXCLUSIONS)).toBe(true);
     expect(isExcluded('/home/dev/myapp/src/App.jsx', DEFAULT_EXCLUSIONS)).toBe(false);
+  });
+});
+
+describe('isExcluded — scan-root aware (Phase C)', () => {
+  it('ignores excluded names that are part of the scan root itself', () => {
+    const root = '/home/u/.cache/photo-export';
+    expect(isExcluded(root + '/a.jpg', ['.cache'], root)).toBe(false);
+    expect(isExcluded(root + '/.cache/a.jpg', ['.cache'], root)).toBe(true);
+  });
+  it('still matches names below the root, on Windows paths too', () => {
+    expect(isExcluded('D:\\Backup\\proj\\node_modules\\x.js', ['node_modules'], 'D:\\Backup')).toBe(true);
+  });
+  it('applies path prefixes regardless of root', () => {
+    expect(isExcluded('C:\\Windows\\System32\\a.dll', ['C:\\Windows'], 'C:\\')).toBe(true);
+  });
+});
+
+describe('path prefixes need a folder boundary', () => {
+  it('does not exclude a sibling that shares the prefix text', () => {
+    expect(isExcluded('D:\\Photos-old\\a.jpg', ['D:\\Photos'])).toBe(false);
+    expect(isExcluded('D:\\Photos\\a.jpg', ['D:\\Photos'])).toBe(true);
+    expect(isExcluded('D:\\Photos', ['D:\\Photos\\'])).toBe(true);
+  });
+});
+
+describe('defaults no longer hide user folders named "Windows"', () => {
+  it('scans D:\\Backup\\Windows but skips C:\\Windows', () => {
+    expect(isExcluded('D:\\Backup\\Windows\\photo.jpg', DEFAULT_EXCLUSIONS, 'D:\\Backup')).toBe(false);
+    expect(isExcluded('C:\\Windows\\explorer.exe', DEFAULT_EXCLUSIONS, 'C:\\')).toBe(true);
+  });
+});
+
+describe('compileExclusions', () => {
+  it('gives the same answers as the raw list', () => {
+    const list = ['node_modules', '*.tmp', 'C:\\Windows'];
+    const compiled = compileExclusions(list);
+    for (const p of ['/a/node_modules/x', '/a/b.tmp', 'C:\\Windows\\x', '/a/b.jpg']) {
+      expect(isExcluded(p, compiled)).toBe(isExcluded(p, list));
+    }
   });
 });

@@ -6,7 +6,7 @@ const api = window.electronAPI;
 // Demo defaults when running outside Electron (mirrors src/main/exclusions.js)
 const DEMO_DEFAULTS = [
   'node_modules', '.git', '.svn', '.hg',
-  'System Volume Information', '$RECYCLE.BIN', 'Windows',
+  'System Volume Information', '$RECYCLE.BIN', 'C:\\Windows',
   'OneDriveTemp', '.dropbox.cache', '.dff-quarantine',
   '@eaDir', '#recycle', '#snapshot', '.snapshot',
   '.DS_Store', '.Spotlight-V100', '.Trashes', '.fseventsd',

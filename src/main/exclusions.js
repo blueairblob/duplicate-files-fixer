@@ -10,10 +10,11 @@ const DEFAULT_EXCLUSIONS = [
   '.git',
   '.svn',
   '.hg',
-  // Windows system
+  // Windows system. 'C:\\Windows' is a path prefix, not a bare name, so a
+  // user's own folder called "Windows" (say, in a backup) is still scanned.
   'System Volume Information',
   '$RECYCLE.BIN',
-  'Windows',
+  'C:\\Windows',
   // Cloud sync caches — these change constantly and produce false-positive "duplicate" noise
   'OneDriveTemp',
   '.dropbox.cache',
@@ -53,45 +54,58 @@ function normalisePath(p) {
 }
 
 /**
- * Returns true if `filePath` should be excluded from scanning, given a list
- * of exclusion entries (strings — exact segment match, glob pattern, or path prefix).
- *
- * Matching rules:
- *  - Entry containing '*' is treated as a glob matched against each path segment
- *  - Entry containing a path separator is treated as a path-prefix match
- *  - Otherwise the entry is matched as an exact (case-insensitive) path segment
+ * Pre-process an exclusion list once per scan (regexes and lower-casing used
+ * to be redone for every file):
+ *  - entry containing '*'         -> glob, matched against each path segment
+ *  - entry containing a separator -> path prefix (with a folder boundary, so
+ *                                    "D:\\Photos" does not exclude "D:\\Photos-old")
+ *  - anything else                -> exact segment name, case-insensitive
  */
-function isExcluded(filePath, exclusions) {
-  if (!exclusions || exclusions.length === 0) return false;
+function compileExclusions(exclusions) {
+  const compiled = { names: new Set(), globs: [], prefixes: [], compiled: true };
+  for (const raw of exclusions || []) {
+    const entry = String(raw || '').trim();
+    if (!entry) continue;
+    if (entry.includes('/') || entry.includes('\\')) {
+      compiled.prefixes.push(normalisePath(entry).replace(/\/+$/, '').toLowerCase());
+    } else if (entry.includes('*')) {
+      compiled.globs.push(globToRegExp(entry));
+    } else {
+      compiled.names.add(entry.toLowerCase());
+    }
+  }
+  return compiled;
+}
+
+/**
+ * True if `filePath` should be skipped.
+ * @param exclusions  an array of entries, or the result of compileExclusions
+ * @param root        the scan root. Name/glob entries only match segments BELOW
+ *                    it, so a root that itself sits inside e.g. ".cache" or a
+ *                    "Windows" folder isn't silently scanned as empty.
+ */
+function isExcluded(filePath, exclusions, root) {
+  if (!exclusions) return false;
+  const m = exclusions.compiled ? exclusions : compileExclusions(exclusions);
+  if (m.names.size === 0 && m.globs.length === 0 && m.prefixes.length === 0) return false;
 
   const normalised = normalisePath(filePath);
-  const segments = normalised.split('/').filter(Boolean);
-
-  for (const rawEntry of exclusions) {
-    const entry = rawEntry.trim();
-    if (!entry) continue;
-
-    if (entry.includes('/') || entry.includes('\\')) {
-      // Path-prefix style exclusion
-      const normalisedEntry = normalisePath(entry);
-      if (normalised.toLowerCase().startsWith(normalisedEntry.toLowerCase())) {
-        return true;
-      }
-      continue;
-    }
-
-    if (entry.includes('*')) {
-      const re = globToRegExp(entry);
-      if (segments.some(seg => re.test(seg))) return true;
-      continue;
-    }
-
-    // Exact segment match (case-insensitive) — matches a folder or file name anywhere in the path
-    const lower = entry.toLowerCase();
-    if (segments.some(seg => seg.toLowerCase() === lower)) return true;
+  const lower = normalised.toLowerCase();
+  for (const prefix of m.prefixes) {
+    if (lower === prefix || lower.startsWith(prefix + '/')) return true;
   }
 
+  let rel = normalised;
+  if (root) {
+    const r = normalisePath(root).replace(/\/+$/, '');
+    if (lower.startsWith(r.toLowerCase() + '/')) rel = normalised.slice(r.length + 1);
+  }
+  for (const seg of rel.split('/')) {
+    if (!seg) continue;
+    if (m.names.has(seg.toLowerCase())) return true;
+    for (const re of m.globs) if (re.test(seg)) return true;
+  }
   return false;
 }
 
-module.exports = { DEFAULT_EXCLUSIONS, isExcluded, globToRegExp, normalisePath };
+module.exports = { DEFAULT_EXCLUSIONS, isExcluded, compileExclusions, globToRegExp, normalisePath };
