@@ -162,9 +162,14 @@ export default function HomeView({ onStartScan, preset = null, exclusionCount = 
     ? simpleFolders.length > 0
     : protectedFolders.length > 0 && targetFolders.length > 0;
 
-  const handleStart = () => {
+  // Overlapping or aliased folders are checked before the scan starts (and
+  // again in the main process). See src/main/roots.js for the rules.
+  const [rootProblem, setRootProblem] = useState(null);
+  useEffect(() => { setRootProblem(null); }, [mode, protectedFolders, targetFolders]);
+
+  const handleStart = async () => {
     if (!canScan) return;
-    onStartScan({
+    const config = {
       mode,
       protectedFolders: mode === 'simple' ? [] : protectedFolders,
       targetFolders:    mode === 'simple' ? simpleFolders : targetFolders,
@@ -172,7 +177,18 @@ export default function HomeView({ onStartScan, preset = null, exclusionCount = 
       autoMarkRule,
       includeEmpty,
       confidence,
-    });
+    };
+    if (api?.checkRoots && mode !== 'simple') {
+      try {
+        const check = await api.checkRoots(config);
+        if (check?.blocked?.length) {
+          const b = check.blocked[0];
+          setRootProblem(`${b.reason} (${b.protected} → ${b.target})`);
+          return;
+        }
+      } catch { /* the main process re-checks on scan start */ }
+    }
+    onStartScan(config);
   };
 
   // One-line summary of the collapsed options, so state stays visible
@@ -301,6 +317,11 @@ export default function HomeView({ onStartScan, preset = null, exclusionCount = 
             All scanning is local — no files leave this device
           </span>
         </div>
+        {rootProblem && (
+          <p role="alert" style={{ marginTop: scale(10), fontSize: 'var(--fs-secondary)', color: 'var(--danger)', lineHeight: 1.5 }}>
+            Can't scan: {rootProblem} Pick folders that don't contain each other.
+          </p>
+        )}
         {!canScan && (
           <p style={{ marginTop: scale(8), fontSize: 'var(--fs-caption)', color: 'var(--text-muted)' }}>
             {mode === 'simple' ? 'Add at least one folder to scan.' : 'Add a folder to each side to start.'}

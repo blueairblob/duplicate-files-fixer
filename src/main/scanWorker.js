@@ -20,6 +20,20 @@ const fsp  = fs.promises;
 const path = require('path');
 const crypto = require('crypto');
 const { isExcluded } = require('./exclusions');
+const { normaliseRoot } = require('./roots');
+
+// Protected folders that sit inside a target root (normalised, see roots.js).
+// The target walk skips them so protected files are never seen as target files.
+const PLATFORM = workerData.platform || process.platform;
+const ROOT_EXCLUDES = new Set(workerData.rootExcludes || []);
+
+// File identity (device + inode). One physical file reached through two paths
+// (overlapping roots, a mapped drive and its UNC path, a junction) must be
+// counted once — otherwise it looks like a duplicate of itself and "deleting
+// the copy" deletes the only copy. First sighting wins; protected roots are
+// walked first, so the protected label is kept.
+const seenIds = new Set();
+let aliasSkipped = 0;
 
 // How many I/O operations to keep in flight at once. Tunable via scan options;
 // 16 is a good default for a NAS. Local SSDs can go higher, but the returns
@@ -320,6 +334,7 @@ async function walkCollect(dir, filters, exclusions, label, sourceFiles, warning
     if (cancelled) return;
     const fullPath = path.join(dir, entry.name);
     if (isExcluded(fullPath, exclusions)) continue;
+    if (entry.isDirectory() && label === 'target' && ROOT_EXCLUDES.has(normaliseRoot(fullPath, PLATFORM))) continue;
     if (entry.isDirectory())  subdirs.push(fullPath);
     else if (entry.isFile())  files.push({ fullPath, name: entry.name });
   }
@@ -329,20 +344,30 @@ async function walkCollect(dir, filters, exclusions, label, sourceFiles, warning
     if (cancelled) return;
     if (!shouldIncludeExt(fullPath, filters)) return;
     try {
-      const stat = await fsp.stat(fullPath);
+      // bigint: NTFS file IDs can exceed 2^53, so a Number inode can collide.
+      const stat = await fsp.stat(fullPath, { bigint: true });
       perfTick();
-      if (filters.minSize && filters.minSize > 0 && stat.size < filters.minSize) return;
+      const size = Number(stat.size);
+      if (filters.minSize && filters.minSize > 0 && size < filters.minSize) return;
+
+      // Some network filesystems report inode 0 — no identity, fall back to path.
+      const id = stat.ino !== 0n ? `${stat.dev}:${stat.ino}` : null;
+      if (id) {
+        if (seenIds.has(id)) { aliasSkipped++; return; }
+        seenIds.add(id);
+      }
 
       counter.walked++;
       sourceFiles.push({
         path: fullPath,
         name,
-        size: stat.size,
+        id,
+        size,
         modified: stat.mtime.toISOString(),
         ext: path.extname(fullPath).toLowerCase(),
         sourceLabel: label,
         root,
-        isEmpty: stat.size === 0,
+        isEmpty: size === 0,
       });
       emitProgress({ phase: 'walking', scanned: counter.walked, currentPath: fullPath });
     } catch (e) {
@@ -698,6 +723,13 @@ async function run() {
   const emptyGroups = (includeEmpty && emptyFiles.length > 0)
     ? emptyFiles.map(f => ({ ...f }))
     : [];
+
+  if (aliasSkipped > 0) {
+    warnings.push({
+      path: '-',
+      reason: `${aliasSkipped.toLocaleString()} file${aliasSkipped === 1 ? ' was' : 's were'} reached through more than one path and counted once`,
+    });
+  }
 
   perfSummary();
   cacheSave();

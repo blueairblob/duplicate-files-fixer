@@ -125,6 +125,20 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
     padding: `${scale(7)}px ${scale(14)}px`, fontSize: 'var(--fs-secondary)',
   };
 
+  // ── Error state ── (a failed scan must not read as "no duplicates")
+  if (scanResult.error) {
+    return (
+      <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: scale(14), padding: scale(32), textAlign: 'center' }}>
+        <h1 style={{ fontSize: 'var(--fs-title)', fontWeight: 500 }}>The scan did not complete</h1>
+        <p style={{ fontSize: 'var(--fs-body)', color: 'var(--danger)', maxWidth: scale(520) }}>{scanResult.error}</p>
+        <button onClick={onBack} style={{
+          background: 'var(--accent)', color: 'var(--on-accent)', borderRadius: 'var(--radius-sm)',
+          fontWeight: 500, fontSize: 'var(--fs-body)', padding: `${scale(9)}px ${scale(24)}px`, marginTop: scale(8),
+        }}>Back</button>
+      </div>
+    );
+  }
+
   // ── Empty state ──
   if (groups.length === 0) {
     return (

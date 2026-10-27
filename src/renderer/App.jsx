@@ -68,7 +68,7 @@ export default function App() {
     if (historyIdRef.current) setHistory(updateHistoryEntry(historyIdRef.current, result));
     // Only yank the user to results if they're actually watching the scan
     if (viewRef.current === 'scanning') {
-      setView(result.mode === 'verify' ? 'verify' : 'results');
+      setView(result.mode === 'verify' && !result.error ? 'verify' : 'results');
     }
   }, []);
 
@@ -203,7 +203,7 @@ export default function App() {
     setShowAllFiles(false);
     setFileSelection(null);
     setSelectionLabel(null);
-    setView(scan.result?.mode === 'verify' ? 'verify' : 'results');
+    setView(scan.result?.mode === 'verify' && !scan.result?.error ? 'verify' : 'results');
   }, [scan]);
 
   // ── Derived display state ───────────────────────────────────────────────────

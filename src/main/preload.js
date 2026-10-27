@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getLocations:     ()       => ipcRenderer.invoke('fs:getLocations'),
   listDirectory:    (path)   => ipcRenderer.invoke('fs:listDirectory', path),
 
+  checkRoots:       (opts)   => ipcRenderer.invoke('scan:checkRoots', opts),
   startScan:        (opts)   => ipcRenderer.invoke('scan:start', opts),
   cancelScan:       ()       => ipcRenderer.invoke('scan:cancel'),
   onScanProgress:   (cb)     => ipcRenderer.on('scan:progress', (_, data) => cb(data)),
