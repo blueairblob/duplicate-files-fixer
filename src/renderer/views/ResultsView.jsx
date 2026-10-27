@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { useDPR } from '../contexts/DPRContext.jsx';
 import {
   ShieldIcon, SearchIcon, ChevronDownIcon, ChevronRightIcon, ChevronLeftIcon, CheckCircleIcon,
@@ -27,6 +27,8 @@ function typeIconFor(ext) {
 }
 
 const CONFIDENCE_LABELS = { quick: 'Quick match', standard: 'Standard match', thorough: 'Thorough match' };
+const PAGE = 200;          // groups rendered per page
+const AUTO_EXPAND_MAX = 50; // above this, groups start collapsed
 
 // Zero-byte files (shown when "include empty files" is on). They hold no data,
 // so they're listed for reference only and never content-matched.
@@ -60,6 +62,104 @@ function EmptyFilesCard({ files, scale }) {
   );
 }
 
+// One duplicate group. Memoized: `markedMask` ('1'/'0' per file) changes only
+// for the group whose selection changed, so ticking a file re-renders one
+// card instead of every card on the page.
+const GroupCard = React.memo(function GroupCard({ group, markedMask, isExpanded, matchWord, scale, onToggleExpand, onToggleFile }) {
+  const groupMarked = markedMask.split('').filter(c => c === '1').length;
+  const TypeIcon = typeIconFor(group.files[0].ext);
+  return (
+    <div style={{
+      background: 'var(--bg-card)', border: '1px solid var(--border)',
+      borderRadius: 'var(--radius-md)', marginBottom: scale(10), overflow: 'hidden',
+    }}>
+      {/* Group header */}
+      <button
+        onClick={() => onToggleExpand(group.id)}
+        style={{
+          width: '100%', textAlign: 'left', background: 'transparent',
+          padding: `${scale(10)}px ${scale(14)}px`,
+          display: 'flex', alignItems: 'center', gap: scale(10),
+        }}
+        onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-hover)'}
+        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+      >
+        <TypeIcon size={scale(17)} color="var(--text-secondary)" />
+        <span style={{ minWidth: 0, flex: 1 }}>
+          <span style={{
+            display: 'block', fontSize: 'var(--fs-secondary)', fontWeight: 500,
+            color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>{group.files[0].name}</span>
+          <span style={{ display: 'block', fontSize: 'var(--fs-caption)', color: 'var(--text-secondary)' }}>
+            {group.files.length} {matchWord} copies · {formatSize(group.files[0].size)} each
+          </span>
+        </span>
+        {groupMarked > 0 && (
+          <span style={{ fontSize: 'var(--fs-caption)', color: 'var(--danger)', flexShrink: 0 }}>
+            {groupMarked} selected
+          </span>
+        )}
+        {isExpanded
+          ? <ChevronDownIcon size={scale(14)} color="var(--text-muted)" />
+          : <ChevronRightIcon size={scale(14)} color="var(--text-muted)" />}
+      </button>
+
+      {/* File rows */}
+      {isExpanded && group.files.map((file, i) => {
+        const isProtected = file.sourceLabel === 'protected';
+        const isMarked = markedMask[i] === '1';
+
+        return (
+          <div
+            key={file.path}
+            onClick={() => onToggleFile(file.path, isProtected)}
+            style={{
+              padding: `${scale(8)}px ${scale(14)}px`,
+              display: 'flex', alignItems: 'center', gap: scale(11),
+              borderTop: '1px solid var(--border)',
+              cursor: isProtected ? 'default' : 'pointer',
+            }}
+            onMouseEnter={e => { if (!isProtected) e.currentTarget.style.background = 'var(--bg-hover)'; }}
+            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+          >
+            {isProtected ? (
+              <span title="Protected — can never be deleted" style={{ display: 'flex', flexShrink: 0 }}>
+                <ShieldIcon size={scale(16)} color="var(--accent)" />
+              </span>
+            ) : (
+              <span style={{
+                width: scale(16), height: scale(16), borderRadius: scale(4), flexShrink: 0,
+                border: `1.5px solid ${isMarked ? 'var(--danger)' : 'var(--border-strong)'}`,
+                background: isMarked ? 'var(--danger)' : 'transparent',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                transition: 'background 0.1s ease, border-color 0.1s ease',
+              }}>
+                {isMarked && <span style={{ color: '#fff', fontSize: scale(10), lineHeight: 1 }}>✓</span>}
+              </span>
+            )}
+
+            <span title={file.path} style={{
+              flex: 1, minWidth: 0, fontSize: 'var(--fs-caption)',
+              color: isMarked ? 'var(--danger)' : 'var(--text-secondary)',
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              direction: 'rtl', textAlign: 'left',
+            }}>{file.path}</span>
+
+            {isProtected && (
+              <span style={{ fontSize: 'var(--fs-caption)', color: 'var(--accent)', flexShrink: 0 }}>
+                Protected
+              </span>
+            )}
+            <span style={{ fontSize: 'var(--fs-caption)', color: 'var(--text-muted)', flexShrink: 0, textAlign: 'right', minWidth: scale(120) }}>
+              {formatSize(file.size)} · {formatDate(file.modified)}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+});
+
 export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, onBack, selection = null, backLabel = null, selectionLabel = null }) {
   const { scale } = useDPR();
   const { groups: allGroups = [], totalScanned = 0, mode, warnings = [], confidence = 'thorough', emptyFiles = [] } = scanResult;
@@ -91,7 +191,13 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
     groups.forEach(g => (g.autoMarked || []).forEach(p => init.add(p)));
     return init;
   });
-  const [expanded, setExpanded] = useState(() => new Set(groups.map(g => g.id)));
+  const [expanded, setExpanded] = useState(() => new Set(groups.length <= AUTO_EXPAND_MAX ? groups.map(g => g.id) : []));
+  const [limit, setLimit] = useState(PAGE);
+  const toggleExpand = useCallback((id) => setExpanded(prev => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  }), []);
   const [search, setSearch] = useState('');
   const [deleting, setDeleting] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -107,9 +213,20 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
   }, [groups, search]);
 
   const markedCount = marked.size;
-  const markedBytes = groups.flatMap(g => g.files)
-    .filter(f => marked.has(f.path))
-    .reduce((a, f) => a + f.size, 0);
+  const visibleGroups = useMemo(() => filteredGroups.slice(0, limit), [filteredGroups, limit]);
+  useEffect(() => { setLimit(PAGE); }, [search]);
+
+  // path -> size, built once; selected size is then O(selected files).
+  const sizeByPath = useMemo(() => {
+    const m = new Map();
+    allGroups.forEach(g => g.files.forEach(f => m.set(f.path, f.size)));
+    return m;
+  }, [allGroups]);
+  const markedBytes = useMemo(() => {
+    let total = 0;
+    marked.forEach(p => { total += sizeByPath.get(p) || 0; });
+    return total;
+  }, [marked, sizeByPath]);
 
   const noSurvivorGroups = useMemo(
     () => groups.filter(g => g.files.length > 0 && g.files.every(f => marked.has(f.path))),
@@ -267,108 +384,18 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
 
         {/* Groups */}
         <div style={{ flex: 1, overflowY: 'auto', padding: `${scale(16)}px ${scale(24)}px` }}>
-          {filteredGroups.map(group => {
-            const isExpanded = expanded.has(group.id);
-            const groupMarked = group.files.filter(f => marked.has(f.path)).length;
-            const TypeIcon = typeIconFor(group.files[0].ext);
-
-            return (
-              <div key={group.id} style={{
-                background: 'var(--bg-card)', border: '1px solid var(--border)',
-                borderRadius: 'var(--radius-md)', marginBottom: scale(10), overflow: 'hidden',
-              }}>
-                {/* Group header */}
-                <button
-                  onClick={() => setExpanded(prev => {
-                    const next = new Set(prev);
-                    next.has(group.id) ? next.delete(group.id) : next.add(group.id);
-                    return next;
-                  })}
-                  style={{
-                    width: '100%', textAlign: 'left', background: 'transparent',
-                    padding: `${scale(10)}px ${scale(14)}px`,
-                    display: 'flex', alignItems: 'center', gap: scale(10),
-                  }}
-                  onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-hover)'}
-                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                >
-                  <TypeIcon size={scale(17)} color="var(--text-secondary)" />
-                  <span style={{ minWidth: 0, flex: 1 }}>
-                    <span style={{
-                      display: 'block', fontSize: 'var(--fs-secondary)', fontWeight: 500,
-                      color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                    }}>{group.files[0].name}</span>
-                    <span style={{ display: 'block', fontSize: 'var(--fs-caption)', color: 'var(--text-secondary)' }}>
-                      {group.files.length} {matchWord} copies · {formatSize(group.files[0].size)} each
-                    </span>
-                  </span>
-                  {groupMarked > 0 && (
-                    <span style={{ fontSize: 'var(--fs-caption)', color: 'var(--danger)', flexShrink: 0 }}>
-                      {groupMarked} selected
-                    </span>
-                  )}
-                  {isExpanded
-                    ? <ChevronDownIcon size={scale(14)} color="var(--text-muted)" />
-                    : <ChevronRightIcon size={scale(14)} color="var(--text-muted)" />}
-                </button>
-
-                {/* File rows */}
-                {isExpanded && group.files.map(file => {
-                  const isProtected = file.sourceLabel === 'protected';
-                  const isMarked = marked.has(file.path);
-
-                  return (
-                    <div
-                      key={file.path}
-                      onClick={() => toggleFile(file.path, isProtected)}
-                      style={{
-                        padding: `${scale(8)}px ${scale(14)}px`,
-                        display: 'flex', alignItems: 'center', gap: scale(11),
-                        borderTop: '1px solid var(--border)',
-                        cursor: isProtected ? 'default' : 'pointer',
-                      }}
-                      onMouseEnter={e => { if (!isProtected) e.currentTarget.style.background = 'var(--bg-hover)'; }}
-                      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                    >
-                      {isProtected ? (
-                        <span title="Protected — can never be deleted" style={{ display: 'flex', flexShrink: 0 }}>
-                          <ShieldIcon size={scale(16)} color="var(--accent)" />
-                        </span>
-                      ) : (
-                        <span style={{
-                          width: scale(16), height: scale(16), borderRadius: scale(4), flexShrink: 0,
-                          border: `1.5px solid ${isMarked ? 'var(--danger)' : 'var(--border-strong)'}`,
-                          background: isMarked ? 'var(--danger)' : 'transparent',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          transition: 'background 0.1s ease, border-color 0.1s ease',
-                        }}>
-                          {isMarked && <span style={{ color: '#fff', fontSize: scale(10), lineHeight: 1 }}>✓</span>}
-                        </span>
-                      )}
-
-                      <span title={file.path} style={{
-                        flex: 1, minWidth: 0, fontSize: 'var(--fs-caption)',
-                        color: isMarked ? 'var(--danger)' : 'var(--text-secondary)',
-                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                        direction: 'rtl', textAlign: 'left',
-                      }}>{file.path}</span>
-
-                      {isProtected && (
-                        <span style={{ fontSize: 'var(--fs-caption)', color: 'var(--accent)', flexShrink: 0 }}>
-                          Protected
-                        </span>
-                      )}
-                      <span style={{ fontSize: 'var(--fs-caption)', color: 'var(--text-muted)', flexShrink: 0, textAlign: 'right', minWidth: scale(120) }}>
-                        {formatSize(file.size)} · {formatDate(file.modified)}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            );
-          })}
-
-          {!selSet && <EmptyFilesCard files={emptyFiles} scale={scale} />}
+          {visibleGroups.map(group => (
+            <GroupCard key={group.id} group={group}
+              markedMask={group.files.map(f => (marked.has(f.path) ? '1' : '0')).join('')}
+              isExpanded={expanded.has(group.id)}
+              matchWord={matchWord} scale={scale}
+              onToggleExpand={toggleExpand} onToggleFile={toggleFile} />
+          ))}
+          {filteredGroups.length > visibleGroups.length && (
+            <button onClick={() => setLimit(l => l + PAGE)} style={{ ...btnSecondary, width: '100%', marginBottom: scale(10) }}>
+              Show {Math.min(PAGE, filteredGroups.length - visibleGroups.length).toLocaleString()} more of {(filteredGroups.length - visibleGroups.length).toLocaleString()} remaining groups
+            </button>
+          )}
 
           {/* Skipped-during-scan warnings */}
           {warnings.length > 0 && (
