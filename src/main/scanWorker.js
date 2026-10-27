@@ -91,6 +91,8 @@ function cacheSave() {
     const tmp = CACHE_PATH + '.tmp';
     fs.writeFileSync(tmp, JSON.stringify(sigCache));
     fs.renameSync(tmp, CACHE_PATH);
+    // Small sidecar so the main process can show cache stats without parsing it.
+    fs.writeFileSync(CACHE_PATH + '.meta.json', JSON.stringify({ entries: Object.keys(sigCache.entries).length, savedAt: new Date().toISOString() }));
     if (PERF_VERBOSE || cacheStats.bhHits || cacheStats.bhMisses || cacheStats.fhHits || cacheStats.fhMisses) {
       console.log(`[scan] cache: ${Object.keys(sigCache.entries).length.toLocaleString()} entries · boundary ${cacheStats.bhHits}/${cacheStats.bhHits + cacheStats.bhMisses} cached · full ${cacheStats.fhHits}/${cacheStats.fhHits + cacheStats.fhMisses} cached`);
     }

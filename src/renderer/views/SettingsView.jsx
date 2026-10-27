@@ -82,7 +82,7 @@ export default function SettingsView() {
             <p style={{ fontSize: 'var(--fs-secondary)', fontWeight: 500, margin: 0 }}>Scan cache</p>
             <p style={{ fontSize: 'var(--fs-caption)', color: 'var(--text-muted)', margin: `${scale(1)}px 0 0` }}>
               {cache?.exists
-                ? `${cache.entries.toLocaleString()} files remembered · repeat scans skip re-reading them`
+                ? `${cache.entries != null ? cache.entries.toLocaleString() + ' files remembered' : 'Files remembered'} · repeat scans skip re-reading them`
                 : 'Empty — the next scan will read every file'}
             </p>
           </div>

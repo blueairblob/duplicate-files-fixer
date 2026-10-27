@@ -5,7 +5,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // File.path was removed in Electron 32; this is the supported replacement.
   getPathForFile:   (file)   => webUtils.getPathForFile(file),
   getLocations:     ()       => ipcRenderer.invoke('fs:getLocations'),
-  listDirectory:    (path)   => ipcRenderer.invoke('fs:listDirectory', path),
 
   checkRoots:       (opts)   => ipcRenderer.invoke('scan:checkRoots', opts),
   startScan:        (opts)   => ipcRenderer.invoke('scan:start', opts),

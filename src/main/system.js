@@ -55,4 +55,4 @@ async function checkRoots(opts) {
   return analyseRoots({ protectedRoots, targetRoots, platform: process.platform, mappings, realpaths });
 }
 
-module.exports = { getNetworkMappings, resolveRealpaths, checkRoots };
+module.exports = { runCapture, getNetworkMappings, resolveRealpaths, checkRoots };
