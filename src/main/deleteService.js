@@ -54,7 +54,10 @@ function createDeleteService({ userDataDir, homeDir, trash }) {
     await fs.promises.rename(tmp, registryPath);
   }
 
+  let cancelRequested = false;
+
   async function deleteFiles(session, payload, onProgress) {
+    cancelRequested = false;
     const paths = ((payload && payload.files) || [])
       .map(f => (typeof f === 'string' ? f : f && f.path))
       .filter(Boolean);
@@ -86,6 +89,7 @@ function createDeleteService({ userDataDir, homeDir, trash }) {
       },
       isNetworkPath: makeIsNetworkPath(process.platform, await getNetworkMappings()),
       verifyContent: !session || session.confidence !== 'thorough',
+      isCancelled: () => cancelRequested,
       onProgress,
     });
 
@@ -97,6 +101,7 @@ function createDeleteService({ userDataDir, homeDir, trash }) {
 
   return {
     deleteFiles,
+    cancel: () => { cancelRequested = true; },
     listQuarantine: async () => listQuarantine(await quarantineDirs()),
     restore: async (quarantinePath) => restoreFile(quarantinePath, await quarantineDirs()),
     quarantineDirs,

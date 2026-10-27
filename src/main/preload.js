@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   removeScanProgress: ()     => ipcRenderer.removeAllListeners('scan:progress'),
 
   deleteFiles:      (req)    => ipcRenderer.invoke('files:delete', req),
+  cancelDelete:     ()       => ipcRenderer.invoke('files:cancelDelete'),
   onDeleteProgress: (cb)     => ipcRenderer.on('files:deleteProgress', (_, data) => cb(data)),
   removeDeleteProgress: ()   => ipcRenderer.removeAllListeners('files:deleteProgress'),
   getQuarantineManifest: ()  => ipcRenderer.invoke('files:getQuarantineManifest'),

@@ -65,7 +65,7 @@ export default function DoneView({ deleteResult, onScanAgain }) {
       {/* Headline */}
       <div style={{ textAlign: 'center' }}>
         <h2 style={{ fontSize: scale(22), fontWeight: 700, marginBottom: scale(6) }}>
-          {allDone ? 'All cleaned up' : removed > 0 ? 'Partly done' : 'Nothing was deleted'}
+          {deleteResult?.cancelled ? 'Stopped' : allDone ? 'All cleaned up' : removed > 0 ? 'Partly done' : 'Nothing was deleted'}
         </h2>
         <p style={{ color: 'var(--text-secondary)', fontSize: scale(13) }}>
           {removed > 0

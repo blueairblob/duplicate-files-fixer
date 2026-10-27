@@ -133,6 +133,7 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
   const deselectAll = () => setMarked(new Set());
 
   const [deleteProgress, setDeleteProgress] = useState(null);
+  const [cancellingDelete, setCancellingDelete] = useState(false);
 
   const handleDelete = async () => {
     setConfirmOpen(false);
@@ -456,6 +457,11 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
               ? (deleteProgress?.total ? `Deleting ${deleteProgress.done.toLocaleString()} of ${deleteProgress.total.toLocaleString()}…` : 'Deleting…')
               : `Delete ${markedCount.toLocaleString()} file${markedCount !== 1 ? 's' : ''}`}
           </button>
+          {deleting && api?.cancelDelete && (
+            <button onClick={() => { setCancellingDelete(true); api.cancelDelete(); }} disabled={cancellingDelete} style={{ ...btnSecondary, width: '100%' }}>
+              {cancellingDelete ? 'Stopping…' : 'Stop deleting'}
+            </button>
+          )}
         </div>
       </div>
 

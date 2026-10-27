@@ -163,6 +163,59 @@ describe('executeDeletion', () => {
   });
 });
 
+describe('executeDeletion — as a job (Phase C)', () => {
+  const many = (n) => Array.from({ length: n }, (_, i) => item({ path: `/t/${i}` }));
+  const statsFor = (n) => {
+    const st = { '/k/a': { size: 10, modified: 'm2', id: '1:2' } };
+    for (let i = 0; i < n; i++) st[`/t/${i}`] = { size: 10, modified: 'm1', id: '1:1' };
+    return st;
+  };
+
+  it('always hashes network files, even after a thorough scan', async () => {
+    const { deps, calls } = fakeDeps({ isNetworkPath: () => true });
+    await executeDeletion([item()], deps);
+    expect(calls.hash.sort()).toEqual(['/k/a', '/t/a']);
+  });
+
+  it('stops when cancelled and leaves the rest in place', async () => {
+    let n = 0;
+    const st = statsFor(10);
+    const { deps } = fakeDeps({
+      stat: async (p) => st[p],
+      trash: async () => { n++; },
+      concurrency: 1,
+    });
+    deps.isCancelled = () => n >= 3;
+    const r = await executeDeletion(many(10), deps);
+    expect(r.trashed).toHaveLength(3);
+    expect(r.skipped.filter(x => /Cancelled/.test(x.reason))).toHaveLength(7);
+    expect(r.cancelled).toBe(true);
+  });
+
+  it('checks files in parallel but moves them one at a time', async () => {
+    const st = statsFor(12);
+    let inFlightStat = 0, maxStat = 0, inFlightMove = 0, maxMove = 0;
+    const tick = () => new Promise(r => setTimeout(r, 2));
+    const { deps } = fakeDeps({
+      stat: async (p) => { inFlightStat++; maxStat = Math.max(maxStat, inFlightStat); await tick(); inFlightStat--; return st[p]; },
+      trash: async () => { inFlightMove++; maxMove = Math.max(maxMove, inFlightMove); await tick(); inFlightMove--; },
+      concurrency: 4,
+    });
+    const r = await executeDeletion(many(12), deps);
+    expect(r.trashed).toHaveLength(12);
+    expect(maxStat).toBeGreaterThan(1);
+    expect(maxMove).toBe(1);
+  });
+
+  it('reports progress for every file', async () => {
+    const st = statsFor(5);
+    const seen = [];
+    const { deps } = fakeDeps({ stat: async (p) => st[p], onProgress: (p) => seen.push(p.done) });
+    await executeDeletion(many(5), deps);
+    expect(seen.sort()).toEqual([1, 2, 3, 4, 5]);
+  });
+});
+
 describe('makeIsNetworkPath', () => {
   it('flags UNC and mapped drives on Windows only', () => {
     const isNet = makeIsNetworkPath('win32', [{ local: 'Z:', remote: '\\\\nas\\s' }]);

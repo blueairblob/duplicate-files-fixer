@@ -245,6 +245,8 @@ function getDeleteService() {
   return deleteService;
 }
 
+ipcMain.handle('files:cancelDelete', async () => { getDeleteService().cancel(); return true; });
+
 ipcMain.handle('files:delete', async (event, payload) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   return getDeleteService().deleteFiles(lastSession, payload, (p) => win?.webContents.send('files:deleteProgress', p));
