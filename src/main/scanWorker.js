@@ -172,9 +172,11 @@ function perfSummary() {
   if (parts.length) console.log(`[scan] ${parts.join(' · ')}`);
 }
 
-// Per-root concurrency limiter: a spinning-disk NAS served 31 concurrent
-// random reads with multi-second FIFO latencies; shallow per-root queues keep
-// latency sane while the global pool overlaps roots freely.
+// Per-device concurrency limiter: a spinning-disk NAS served 31 concurrent
+// random reads with multi-second FIFO latencies; shallow per-device queues keep
+// latency sane while the global pool overlaps devices freely. Keyed by the
+// file's device id from stat (drive letters alone missed every POSIX path,
+// so on macOS/Linux/WSL all drives used to share one gate).
 const ROOT_LIMIT = 8;        // small single-read ops (boundary hashing)
 const STREAM_ROOT_LIMIT = 3; // full-file streams: fewer at once = less seek thrash
 const rootGates = new Map();
@@ -184,10 +186,10 @@ function rootOf(p) {
   const unc = /^\\\\[^\\]+\\[^\\]+/.exec(p);
   return unc ? unc[0].toLowerCase() : '?';
 }
-async function withRootLimit(p, fn, limit = ROOT_LIMIT) {
-  const root = rootOf(p);
-  let gate = rootGates.get(root);
-  if (!gate) { gate = { active: 0, waiters: [] }; rootGates.set(root, gate); }
+async function withRootLimit(file, fn, limit = ROOT_LIMIT) {
+  const key = file.dev || rootOf(file.path);
+  let gate = rootGates.get(key);
+  if (!gate) { gate = { active: 0, waiters: [] }; rootGates.set(key, gate); }
   while (gate.active >= limit) {
     await new Promise(resolve => gate.waiters.push(resolve));
   }
@@ -291,38 +293,39 @@ async function hashFileBoundary(filePath, fileSize) {
   }
 }
 
-// ── Pass 1: walk + collect candidate files grouped by size ───────────────────
-// Async recursion: readdir per directory, then stat this directory's files
-// through the concurrency pool (the per-file round-trip is the NAS bottleneck).
-async function walkCollect(dir, filters, exclusions, label, sourceFiles, warnings, counter, root) {
-  if (root === undefined) root = dir;
-  if (cancelled) return;
+// ── Pass 1: walk + collect file metadata ─────────────────────────────────────
+// One shared pool of CONCURRENCY runners pulls from a queue holding both
+// folders (readdir) and files (stat). Folders used to be walked one at a
+// time, so concurrency only existed inside a single folder — trees of many
+// small folders (photo archives) were latency-bound on a NAS.
+async function walkRoots(roots, label, filters, allFiles, warnings, counter) {
+  const queue = roots.map(r => ({ dir: r, root: r }));
+  let active = 0;
+  let waiters = [];
+  const wakeAll = () => { const w = waiters; waiters = []; w.forEach(fn => fn()); };
 
-  emitProgress({ phase: 'walking', scanned: counter.walked, currentPath: dir });
-
-  let entries;
-  try {
-    entries = await fsp.readdir(dir, { withFileTypes: true });
-  } catch (e) {
-    warnings.push({ path: dir, reason: e.code === 'EACCES' ? 'Permission denied' : e.message });
-    return;
+  async function readFolder({ dir, root }) {
+    emitProgress({ phase: 'walking', scanned: counter.walked, currentPath: dir });
+    let entries;
+    try {
+      entries = await fsp.readdir(dir, { withFileTypes: true });
+    } catch (e) {
+      warnings.push({ path: dir, reason: e.code === 'EACCES' ? 'Permission denied' : e.message });
+      return;
+    }
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      if (isExcluded(fullPath, EXCLUSIONS, root)) continue;
+      if (entry.isDirectory()) {
+        if (label === 'target' && ROOT_EXCLUDES.has(normaliseRoot(fullPath, PLATFORM))) continue;
+        queue.push({ dir: fullPath, root });
+      } else if (entry.isFile() && shouldIncludeFile(fullPath, filters)) {
+        queue.push({ file: fullPath, name: entry.name, root });
+      }
+    }
   }
 
-  const subdirs = [];
-  const files   = [];
-  for (const entry of entries) {
-    if (cancelled) return;
-    const fullPath = path.join(dir, entry.name);
-    if (isExcluded(fullPath, EXCLUSIONS, root)) continue;
-    if (entry.isDirectory() && label === 'target' && ROOT_EXCLUDES.has(normaliseRoot(fullPath, PLATFORM))) continue;
-    if (entry.isDirectory())  subdirs.push(fullPath);
-    else if (entry.isFile())  files.push({ fullPath, name: entry.name });
-  }
-
-  // Stat this directory's files concurrently.
-  await runPool(files, CONCURRENCY, async ({ fullPath, name }) => {
-    if (cancelled) return;
-    if (!shouldIncludeFile(fullPath, filters)) return;
+  async function statFile({ file: fullPath, name, root }) {
     try {
       // bigint: NTFS file IDs can exceed 2^53, so a Number inode can collide.
       const stat = await fsp.stat(fullPath, { bigint: true });
@@ -338,10 +341,11 @@ async function walkCollect(dir, filters, exclusions, label, sourceFiles, warning
       }
 
       counter.walked++;
-      sourceFiles.push({
+      allFiles.push({
         path: fullPath,
         name,
         id,
+        dev: String(stat.dev),
         size,
         modified: stat.mtime.toISOString(),
         ext: path.extname(fullPath).toLowerCase(),
@@ -353,18 +357,35 @@ async function walkCollect(dir, filters, exclusions, label, sourceFiles, warning
     } catch (e) {
       warnings.push({ path: fullPath, reason: e.code === 'EBUSY' ? 'File locked' : e.message });
     }
-  });
-
-  // Then descend into subdirectories.
-  for (const sub of subdirs) {
-    if (cancelled) return;
-    await walkCollect(sub, filters, exclusions, label, sourceFiles, warnings, counter, root);
   }
+
+  async function runner() {
+    for (;;) {
+      if (cancelled) return;
+      // LIFO: finish a subtree before opening many more folders, which keeps
+      // the queue (and memory) small.
+      const task = queue.pop();
+      if (!task) {
+        if (active === 0) { wakeAll(); return; }
+        await new Promise(resolve => waiters.push(resolve));
+        continue;
+      }
+      active++;
+      try {
+        await (task.dir ? readFolder(task) : statFile(task));
+      } finally {
+        active--;
+        wakeAll();
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: CONCURRENCY }, runner));
 }
 
 async function run() {
   perfPhase('walk');
-  const { mode, protectedFolders, targetFolders, filters, autoMarkRule, exclusions, includeEmpty } = workerData;
+  const { mode, protectedFolders, targetFolders, filters, autoMarkRule, includeEmpty } = workerData;
 
   const warnings = [];
   const counter  = { walked: 0, hashed: 0 };
@@ -375,20 +396,13 @@ async function run() {
   emitProgress({ phase: 'walking', scanned: 0, currentPath: firstFolder }, true);
 
   // ── Pass 1: walk all folders, collect file metadata (cheap) ──────────────
+  // Protected roots finish before target roots start: identity dedupe keeps
+  // the first sighting, and it must be the protected one.
   if (mode === 'compare' || mode === 'verify') {
-    for (const folder of (protectedFolders || [])) {
-      if (cancelled) break;
-      await walkCollect(folder, filters || {}, exclusions || [], 'protected', allFiles, warnings, counter);
-    }
-    for (const folder of (targetFolders || [])) {
-      if (cancelled) break;
-      await walkCollect(folder, filters || {}, exclusions || [], 'target', allFiles, warnings, counter);
-    }
+    await walkRoots(protectedFolders || [], 'protected', filters || {}, allFiles, warnings, counter);
+    if (!cancelled) await walkRoots(targetFolders || [], 'target', filters || {}, allFiles, warnings, counter);
   } else {
-    for (const folder of (targetFolders || [])) {
-      if (cancelled) break;
-      await walkCollect(folder, filters || {}, exclusions || [], 'target', allFiles, warnings, counter);
-    }
+    await walkRoots(targetFolders || [], 'target', filters || {}, allFiles, warnings, counter);
   }
 
   if (cancelled) { cacheSave(); parentPort.postMessage({ type: 'cancelled' }); return; }
@@ -425,7 +439,7 @@ async function run() {
       if (bHash) {
         cacheStats.bhHits++;
       } else {
-        bHash = await withRootLimit(file.path, () => hashFileBoundary(file.path, file.size));
+        bHash = await withRootLimit(file, () => hashFileBoundary(file.path, file.size));
         cachePut(file, 'bh', bHash);
         cacheStats.bhMisses++;
       }
@@ -466,7 +480,7 @@ async function run() {
       if (hash) {
         cacheStats.fhHits++;
       } else {
-        hash = await withRootLimit(file.path, () => hashFileFull(file.path), STREAM_ROOT_LIMIT);
+        hash = await withRootLimit(file, () => hashFileFull(file.path), STREAM_ROOT_LIMIT);
         cachePut(file, 'fh', hash);
         cacheStats.fhMisses++;
       }
