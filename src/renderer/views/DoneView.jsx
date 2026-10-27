@@ -11,12 +11,15 @@ function formatSize(bytes) {
 
 export default function DoneView({ deleteResult, onScanAgain }) {
   const { scale } = useDPR();
-  const { deleted = [], failed = [], quarantined = [], skipped = [], markedBytes = 0, totalScanned = 0 } = deleteResult || {};
+  const { trashed = [], quarantined = [], failed = [], skipped = [], freedBytes = 0, totalScanned = 0 } = deleteResult || {};
+  // Every outcome is reported separately; nothing is ever permanently deleted.
+  const removed = trashed.length + quarantined.length;
+  const allDone = removed > 0 && skipped.length === 0 && failed.length === 0;
   const [count, setCount] = useState(0);
 
   // Animate the counter
   useEffect(() => {
-    const target = deleted.length;
+    const target = removed;
     if (target === 0) return;
     let current = 0;
     const step = Math.max(1, Math.floor(target / 30));
@@ -26,7 +29,7 @@ export default function DoneView({ deleteResult, onScanAgain }) {
       if (current >= target) clearInterval(interval);
     }, 30);
     return () => clearInterval(interval);
-  }, [deleted.length]);
+  }, [removed]);
 
   return (
     <div style={{
@@ -62,12 +65,12 @@ export default function DoneView({ deleteResult, onScanAgain }) {
       {/* Headline */}
       <div style={{ textAlign: 'center' }}>
         <h2 style={{ fontSize: scale(22), fontWeight: 700, marginBottom: scale(6) }}>
-          {deleted.length > 0 ? 'All cleaned up' : 'Nothing was deleted'}
+          {allDone ? 'All cleaned up' : removed > 0 ? 'Partly done' : 'Nothing was deleted'}
         </h2>
         <p style={{ color: 'var(--text-secondary)', fontSize: scale(13) }}>
-          {deleted.length > 0
-            ? `Moved ${deleted.length} file${deleted.length !== 1 ? 's' : ''} to the Recycle Bin`
-            : 'No files were selected for deletion.'}
+          {removed > 0
+            ? `Removed ${removed.toLocaleString()} file${removed !== 1 ? 's' : ''} — all of them recoverable`
+            : 'Every selected file was left in place. See below for why.'}
         </p>
       </div>
 
@@ -80,9 +83,9 @@ export default function DoneView({ deleteResult, onScanAgain }) {
         overflow: 'hidden',
       }}>
         {[
-          { label: 'Space freed', value: formatSize(markedBytes), color: 'var(--teal)' },
-          { label: 'Files removed', value: deleted.length, color: 'var(--text-primary)' },
-          { label: 'Failed', value: failed.length, color: failed.length > 0 ? 'var(--red)' : 'var(--text-muted)' },
+          { label: 'Space freed', value: formatSize(freedBytes), color: 'var(--teal)' },
+          { label: 'Files removed', value: removed, color: 'var(--text-primary)' },
+          { label: 'Not deleted', value: skipped.length + failed.length, color: skipped.length + failed.length > 0 ? 'var(--amber)' : 'var(--text-muted)' },
           { label: 'Files scanned', value: totalScanned.toLocaleString(), color: 'var(--text-primary)' },
         ].map(({ label, value, color }) => (
           <div key={label} style={{ padding: `${scale(20)}px ${scale(24)}px`, textAlign: 'center', borderRight: '1px solid var(--border)' }}>
@@ -102,11 +105,11 @@ export default function DoneView({ deleteResult, onScanAgain }) {
           maxWidth: 480,
         }}>
           <div style={{ fontWeight: 600, marginBottom: scale(6) }}>
-            {skipped.length} file{skipped.length !== 1 ? 's' : ''} skipped — safety check found the contents no longer match, so they were NOT deleted:
+            {skipped.length} file{skipped.length !== 1 ? 's' : ''} NOT deleted — a safety check stopped {skipped.length !== 1 ? 'them' : 'it'}:
           </div>
           {skipped.slice(0, 5).map(sk => (
             <div key={sk.path} style={{ fontFamily: 'var(--font-mono)', fontSize: scale(11), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={`${sk.path} — ${sk.reason}`}>
-              {sk.path}
+              {sk.reason}: {sk.path}
             </div>
           ))}
           {skipped.length > 5 && <div style={{ marginTop: scale(4) }}>…and {skipped.length - 5} more</div>}
@@ -114,7 +117,7 @@ export default function DoneView({ deleteResult, onScanAgain }) {
       )}
 
       {/* Recycle bin / quarantine note */}
-      {deleted.length > 0 && quarantined.length === 0 && (
+      {trashed.length > 0 && (
         <div style={{
           background: 'var(--teal-dim)',
           border: '1px solid var(--teal)',
@@ -123,7 +126,7 @@ export default function DoneView({ deleteResult, onScanAgain }) {
           fontSize: scale(12), color: 'var(--teal)',
           maxWidth: 400, textAlign: 'center',
         }}>
-          ♻ Files were moved to the Recycle Bin — you can still recover them if needed.
+          ♻ {trashed.length.toLocaleString()} file{trashed.length !== 1 ? 's were' : ' was'} moved to the Recycle Bin — you can still recover them if needed.
         </div>
       )}
 
@@ -136,8 +139,9 @@ export default function DoneView({ deleteResult, onScanAgain }) {
           fontSize: scale(12), color: 'var(--amber)',
           maxWidth: 440, textAlign: 'center',
         }}>
-          🛡 {quarantined.length} file{quarantined.length !== 1 ? 's' : ''} couldn't reach the system Recycle Bin
-          and {quarantined.length !== 1 ? 'were' : 'was'} moved to an in-app quarantine folder instead — still fully recoverable.
+          🛡 {quarantined.length.toLocaleString()} file{quarantined.length !== 1 ? 's' : ''} couldn't go to the Recycle Bin (network drives
+          don't have one) and {quarantined.length !== 1 ? 'were' : 'was'} moved to a .dff-quarantine folder on the same drive instead.
+          Restore {quarantined.length !== 1 ? 'them' : 'it'} from Quarantine in the sidebar.
         </div>
       )}
 
@@ -148,7 +152,7 @@ export default function DoneView({ deleteResult, onScanAgain }) {
           borderRadius: 'var(--radius-sm)', padding: `${scale(10)}px ${scale(18)}px`,
           fontSize: scale(11), color: 'var(--red)', maxWidth: 440,
         }}>
-          <strong>{failed.length} file{failed.length !== 1 ? 's' : ''} could not be deleted.</strong>
+          <strong>{failed.length} file{failed.length !== 1 ? 's' : ''} could not be moved anywhere recoverable, so {failed.length !== 1 ? 'they were' : 'it was'} left in place.</strong>
           <div style={{ marginTop: scale(6) }}>
             {failed.slice(0, 3).map(f => (
               <div key={f.path} style={{ fontFamily: 'var(--font-mono)', fontSize: scale(10), color: 'var(--text-secondary)', marginTop: scale(2) }}>

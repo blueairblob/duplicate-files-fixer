@@ -21,11 +21,15 @@ const os = require('os');
 const crypto = require('crypto');
 const { DEFAULT_EXCLUSIONS } = require('./exclusions');
 const { analyseRoots } = require('./roots');
+const { buildSession, planDeletion, forgetPaths } = require('./deleteGuard');
+const { executeDeletion, makeIsNetworkPath } = require('./deleteFiles');
+const { quarantineFile, listQuarantine, restoreFile } = require('./quarantine');
 const { execFile } = require('child_process');
 
 const isDev = process.env.NODE_ENV === 'development';
 
 let activeWorker = null;
+let lastSession = null; // deleteGuard session from the last completed scan
 let exclusionList = [...DEFAULT_EXCLUSIONS]; // in-memory for the prototype; Sprint 4 persists this via electron-store
 
 function createWindow() {
@@ -424,6 +428,7 @@ ipcMain.handle('scan:start', async (event, opts) => {
 
   // Enforced here as well as in the UI: overlapping or aliased roots can make
   // a protected file look like a deletable target copy.
+  lastSession = null; // a new scan supersedes the old results
   const roots = await checkRoots(opts);
   if (roots.blocked.length > 0) {
     const reason = roots.blocked[0].reason;
@@ -460,6 +465,7 @@ ipcMain.handle('scan:start', async (event, opts) => {
         win?.webContents.send('scan:progress', { scanned: msg.scanned, phase: msg.phase, total: msg.total, currentPath: msg.currentPath ?? '' });
       } else if (msg.type === 'done') {
         activeWorker = null;
+        lastSession = buildSession(msg.result, opts, process.platform);
         resolve(msg.result);
       } else if (msg.type === 'cancelled') {
         activeWorker = null;
@@ -501,139 +507,85 @@ ipcMain.handle('scan:cancel', async () => {
   return false;
 });
 
-// ── IPC: Delete with Linux trash fallback + quarantine manifest ──────────────
-const QUARANTINE_DIR = path.join(os.homedir(), '.dff-quarantine');
-const MANIFEST_PATH = path.join(QUARANTINE_DIR, 'manifest.json');
+// ── IPC: Delete ──────────────────────────────────────────────────────────────
+// The renderer only says WHICH files. The main process decides whether that's
+// allowed (deleteGuard, checked against the last completed scan) and how
+// (deleteFiles: Recycle Bin or same-volume quarantine, never permanent).
+const SIG_CACHE_PATH = () => path.join(app.getPath('userData'), 'dff-signature-cache.json');
+const QUARANTINE_REGISTRY = () => path.join(app.getPath('userData'), 'dff-quarantine-dirs.json');
+const LEGACY_QUARANTINE_DIR = path.join(os.homedir(), '.dff-quarantine');
 
-function ensureQuarantineDir() {
-  try {
-    fs.mkdirSync(QUARANTINE_DIR, { recursive: true });
-  } catch {}
+// Every quarantine folder ever used, so Recovery can list them all.
+async function loadQuarantineDirs() {
+  let dirs = [];
+  try { dirs = JSON.parse(await fs.promises.readFile(QUARANTINE_REGISTRY(), 'utf8')); } catch { /* none yet */ }
+  if (!Array.isArray(dirs)) dirs = [];
+  return Array.from(new Set([LEGACY_QUARANTINE_DIR, ...dirs]));
+}
+async function rememberQuarantineDir(dir) {
+  const dirs = await loadQuarantineDirs();
+  if (dirs.includes(dir)) return;
+  const next = [...dirs.filter(d => d !== LEGACY_QUARANTINE_DIR), dir];
+  const tmp = QUARANTINE_REGISTRY() + '.tmp';
+  await fs.promises.writeFile(tmp, JSON.stringify(next, null, 2));
+  await fs.promises.rename(tmp, QUARANTINE_REGISTRY());
 }
 
-function appendManifest(entry) {
-  ensureQuarantineDir();
-  let manifest = [];
-  try {
-    manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf8'));
-  } catch {}
-  manifest.push(entry);
-  try {
-    fs.writeFileSync(MANIFEST_PATH, JSON.stringify(manifest, null, 2));
-  } catch {}
+// Same size/mtime/identity format the scan worker records.
+async function statForDelete(p) {
+  const st = await fs.promises.stat(p, { bigint: true });
+  return { size: Number(st.size), modified: st.mtime.toISOString(), id: st.ino !== 0n ? `${st.dev}:${st.ino}` : null };
 }
 
-function quarantineFile(filePath) {
-  ensureQuarantineDir();
-  const basename = path.basename(filePath);
-  const stamp = Date.now();
-
-  // Guarantee a unique destination. Date.now() alone collides when several files
-  // sharing a basename are deleted within the same millisecond (common in a bulk
-  // delete), and a bare renameSync would then silently overwrite the earlier
-  // quarantined copy — losing recoverable data and leaving two manifest entries
-  // pointing at one file.
-  let destPath;
-  do {
-    const rand = crypto.randomBytes(4).toString('hex');
-    destPath = path.join(QUARANTINE_DIR, `${stamp}_${rand}_${basename}`);
-  } while (fs.existsSync(destPath));
-
-  fs.renameSync(filePath, destPath);
-  appendManifest({
-    originalPath: filePath,
-    quarantinePath: destPath,
-    deletedAt: new Date().toISOString(),
-  });
-  return destPath;
-}
-
-ipcMain.handle('files:delete', async (event, payload) => {
-  // Accepts either a bare array of paths (legacy, no verification) or
-  // { files: [{ path, counterpart }], verify: bool }. With verify on, each
-  // file is full-hash compared against its kept counterpart immediately
-  // before deletion; a mismatch skips the file. This is what makes Quick /
-  // Standard scan confidence safe: certainty is bought per-deleted-file at
-  // delete time instead of per-scanned-file at scan time.
-  const legacy = Array.isArray(payload);
-  const items = legacy ? payload.map(p => ({ path: p })) : (payload && payload.files) || [];
-  const verify = !legacy && !!(payload && payload.verify);
-  const results = { deleted: [], failed: [], quarantined: [], skipped: [] };
-
-  let sigCache = null;
-  const loadSigCache = () => {
-    if (sigCache) return sigCache;
-    try {
-      sigCache = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'dff-signature-cache.json'), 'utf8'));
-    } catch { sigCache = { entries: {} }; }
-    return sigCache;
-  };
-  const fullHash = (p) => new Promise((resolve, reject) => {
+function hashFull(p) {
+  return new Promise((resolve, reject) => {
     const h = crypto.createHash('sha256');
     const st = fs.createReadStream(p, { highWaterMark: 1024 * 1024 });
     st.on('data', d => h.update(d));
     st.on('end', () => resolve(h.digest('hex')));
     st.on('error', reject);
   });
+}
+
+ipcMain.handle('files:delete', async (event, payload) => {
+  const paths = ((payload && payload.files) || [])
+    .map(f => (typeof f === 'string' ? f : f && f.path))
+    .filter(Boolean);
+  const { items, rejected } = planDeletion(paths, lastSession, { allowNoSurvivor: !!(payload && payload.allowNoSurvivor) });
+
   // Reuse the scan's signature cache when (size, mtime) still match — most
   // verifications then cost zero reads.
-  const hashOf = async (p) => {
+  let sigCache = null;
+  const hash = async (p) => {
+    if (!sigCache) {
+      try { sigCache = JSON.parse(await fs.promises.readFile(SIG_CACHE_PATH(), 'utf8')); } catch { sigCache = { entries: {} }; }
+    }
     try {
-      const st = fs.statSync(p);
-      const e = loadSigCache().entries && loadSigCache().entries[p];
-      if (e && e.size === st.size && e.m === st.mtime.toISOString() && e.fh) return e.fh;
+      const s = await statForDelete(p);
+      const e = sigCache.entries && sigCache.entries[p];
+      if (e && e.size === s.size && e.m === s.modified && e.fh) return e.fh;
     } catch { /* fall through to reading */ }
-    return fullHash(p);
+    return hashFull(p);
   };
 
-  for (const item of items) {
-    const filePath = item.path;
+  const win = BrowserWindow.fromWebContents(event.sender);
+  const results = await executeDeletion(items, {
+    stat: statForDelete,
+    hash,
+    trash: (p) => shell.trashItem(p),
+    quarantine: async (p, file) => {
+      const r = await quarantineFile(p, { scanRoot: file.root, homeDir: os.homedir() });
+      try { await rememberQuarantineDir(r.dir); } catch (e) { console.error('[delete] could not record quarantine folder', r.dir, e.message); }
+      return r;
+    },
+    isNetworkPath: makeIsNetworkPath(process.platform, await getNetworkMappings()),
+    verifyContent: !lastSession || lastSession.confidence !== 'thorough',
+    onProgress: (p) => win?.webContents.send('files:deleteProgress', p),
+  });
 
-    if (verify) {
-      if (!item.counterpart) {
-        results.skipped.push({ path: filePath, reason: 'No kept copy to verify against — not deleted' });
-        continue;
-      }
-      try {
-        const [a, b] = await Promise.all([hashOf(filePath), hashOf(item.counterpart)]);
-        if (a !== b) {
-          results.skipped.push({ path: filePath, reason: 'Contents no longer match the kept copy — not deleted' });
-          continue;
-        }
-      } catch (e) {
-        results.skipped.push({ path: filePath, reason: `Could not verify: ${e.message}` });
-        continue;
-      }
-    }
-
-    // 1. Try the OS trash first (works reliably on Windows/macOS, often fails on Linux/WSL)
-    try {
-      await shell.trashItem(filePath);
-      results.deleted.push(filePath);
-      continue;
-    } catch {
-      // fall through to quarantine fallback
-    }
-
-    // 2. Fallback: move to in-app quarantine folder with a manifest entry, recoverable
-    try {
-      quarantineFile(filePath);
-      results.deleted.push(filePath);
-      results.quarantined.push(filePath);
-      continue;
-    } catch {
-      // fall through to last-resort permanent delete
-    }
-
-    // 3. Last resort: permanent delete (only reached if both trash and quarantine fail,
-    //    e.g. cross-device rename error or a read-only filesystem)
-    try {
-      fs.unlinkSync(filePath);
-      results.deleted.push(filePath);
-    } catch (e) {
-      results.failed.push({ path: filePath, error: e.message });
-    }
-  }
+  forgetPaths(lastSession, [...results.trashed, ...results.quarantined]);
+  results.skipped.unshift(...rejected);
+  results.deleted = [...results.trashed, ...results.quarantined];
   return results;
 });
 
@@ -659,38 +611,10 @@ ipcMain.handle('cache:clear', async () => {
   }
 });
 
-ipcMain.handle('files:getQuarantineManifest', async () => {
-  try {
-    return JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf8'));
-  } catch {
-    return [];
-  }
-});
+ipcMain.handle('files:getQuarantineManifest', async () => listQuarantine(await loadQuarantineDirs()));
 
-ipcMain.handle('files:restoreFromQuarantine', async (event, quarantinePath) => {
-  try {
-    let manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf8'));
-    const entry = manifest.find(e => e.quarantinePath === quarantinePath);
-    if (!entry) return { success: false, error: 'Not found in manifest' };
-
-    // Refuse to overwrite a file that now lives at the original location —
-    // silently clobbering it would just relocate the data loss.
-    if (fs.existsSync(entry.originalPath)) {
-      return { success: false, error: 'A file already exists at the original location' };
-    }
-
-    // The original parent folder may have been removed since deletion; recreate
-    // it so the restore can't fail on a missing directory.
-    fs.mkdirSync(path.dirname(entry.originalPath), { recursive: true });
-
-    fs.renameSync(entry.quarantinePath, entry.originalPath);
-    manifest = manifest.filter(e => e.quarantinePath !== quarantinePath);
-    fs.writeFileSync(MANIFEST_PATH, JSON.stringify(manifest, null, 2));
-    return { success: true };
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
-});
+ipcMain.handle('files:restoreFromQuarantine', async (_event, quarantinePath) =>
+  restoreFile(quarantinePath, await loadQuarantineDirs()));
 
 // ── IPC: Window controls ──────────────────────────────────────────────────────
 ipcMain.on('window:minimize', () => BrowserWindow.getFocusedWindow()?.minimize());

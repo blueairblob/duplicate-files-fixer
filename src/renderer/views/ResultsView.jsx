@@ -44,8 +44,17 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
   // Wording honesty: only a thorough scan has byte-for-byte proven identity.
   const matchWord = confidence === 'thorough' ? 'identical' : 'matching';
 
+  // Only non-protected members of a duplicate group can ever be marked. A
+  // selection handed over from Compare is filtered through this too. (The
+  // main process enforces the same rule independently.)
+  const deletable = useMemo(() => {
+    const s = new Set();
+    allGroups.forEach(g => g.files.forEach(f => { if (f.sourceLabel !== 'protected') s.add(f.path); }));
+    return s;
+  }, [allGroups]);
+
   const [marked, setMarked] = useState(() => {
-    if (selSet) return new Set(selSet);
+    if (selSet) return new Set([...selSet].filter(p => deletable.has(p)));
     const init = new Set();
     groups.forEach(g => (g.autoMarked || []).forEach(p => init.add(p)));
     return init;
@@ -91,32 +100,30 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
   };
   const deselectAll = () => setMarked(new Set());
 
+  const [deleteProgress, setDeleteProgress] = useState(null);
+
   const handleDelete = async () => {
     setConfirmOpen(false);
     setDeleting(true);
-    const paths = Array.from(marked);
-    // Verify-on-delete: pair every file with a kept copy from its group so the
-    // main process can full-hash both immediately before deleting. Applies
-    // whenever the scan ran below 'thorough' confidence.
-    const needsVerify = confidence !== 'thorough';
-    const files = paths.map(p => {
-      const group = groups.find(g => g.files.some(f => f.path === p));
-      let counterpart = null;
-      if (group) {
-        const keepers = group.files.filter(f => !marked.has(f.path));
-        const protectedKeeper = keepers.find(f => f.sourceLabel === 'protected');
-        counterpart = (protectedKeeper || keepers[0])?.path || null;
-      }
-      return { path: p, counterpart };
-    });
+    // The main process picks the kept copy, re-checks every file against the
+    // scan, verifies content where needed, and routes to the Recycle Bin or a
+    // same-drive quarantine. We only say which files.
+    const paths = Array.from(marked).filter(p => deletable.has(p));
     let result;
     if (api) {
-      result = await api.deleteFiles({ files, verify: needsVerify });
+      api.onDeleteProgress?.(p => setDeleteProgress(p));
+      try {
+        result = await api.deleteFiles({ files: paths.map(path => ({ path })), allowNoSurvivor: ackWipeout });
+      } catch (e) {
+        result = { trashed: [], quarantined: [], skipped: [], failed: paths.map(path => ({ path, error: e.message })), freedBytes: 0 };
+      } finally {
+        api.removeDeleteProgress?.();
+      }
     } else {
       await new Promise(r => setTimeout(r, 800));
-      result = { deleted: paths, failed: [] };
+      result = { trashed: paths, quarantined: [], skipped: [], failed: [], freedBytes: markedBytes };
     }
-    onDeleteComplete({ ...result, markedBytes, totalScanned });
+    onDeleteComplete({ ...result, totalScanned });
   };
 
   const btnSecondary = {
@@ -394,7 +401,8 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
 
           <p style={{ fontSize: 'var(--fs-caption)', color: 'var(--text-muted)', lineHeight: 1.5, margin: 0 }}>
             {mode === 'compare' && 'Protected files can never be deleted. '}
-            Deleted files go to the Recycle Bin{confidence !== 'thorough' && ' and are verified byte-for-byte first'}.
+            Each file is re-checked against its kept copy{confidence !== 'thorough' && ' byte-for-byte'}, then moved to the
+            Recycle Bin or a recovery folder on the same drive. Nothing is permanently deleted.
           </p>
 
           <button
@@ -409,7 +417,9 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
               cursor: markedCount === 0 ? 'not-allowed' : 'pointer',
             }}
           >
-            {deleting ? 'Deleting…' : `Delete ${markedCount.toLocaleString()} file${markedCount !== 1 ? 's' : ''}`}
+            {deleting
+              ? (deleteProgress?.total ? `Deleting ${deleteProgress.done.toLocaleString()} of ${deleteProgress.total.toLocaleString()}…` : 'Deleting…')
+              : `Delete ${markedCount.toLocaleString()} file${markedCount !== 1 ? 's' : ''}`}
           </button>
         </div>
       </div>
@@ -432,8 +442,9 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
               Delete {markedCount.toLocaleString()} file{markedCount !== 1 ? 's' : ''}?
             </h2>
             <p style={{ fontSize: 'var(--fs-secondary)', color: 'var(--text-secondary)', marginBottom: scale(16) }}>
-              {formatSize(markedBytes)} will be moved to the Recycle Bin
-              {confidence !== 'thorough' && ', after verifying each file still matches its kept copy'}.
+              {formatSize(markedBytes)} will be moved to the Recycle Bin, or to a recovery folder on the same
+              drive when the Recycle Bin can't take it. Each file is first checked against its kept copy;
+              anything that no longer matches is left alone.
             </p>
 
             {noSurvivorGroups.length > 0 && (
