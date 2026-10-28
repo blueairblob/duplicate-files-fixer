@@ -25,14 +25,14 @@ export default function Sidebar({ section, onSelectSection, onSelectRecent, rece
   });
 
   return (
-    <div style={{
+    <nav aria-label="Sections" style={{
       width: 'var(--sidebar-w)', flexShrink: 0, height: '100%',
       background: 'var(--bg-sidebar)', borderRight: '1px solid var(--border)',
       display: 'flex', flexDirection: 'column',
       padding: `${scale(10)}px ${scale(8)}px`,
     }}>
       {NAV.map(({ id, label, Icon }) => (
-        <button key={id} onClick={() => onSelectSection(id)} style={itemStyle(section === id)}
+        <button key={id} onClick={() => onSelectSection(id)} aria-current={section === id ? 'page' : undefined} style={itemStyle(section === id)}
           onMouseEnter={e => { if (section !== id) e.currentTarget.style.background = 'var(--bg-hover)'; }}
           onMouseLeave={e => { if (section !== id) e.currentTarget.style.background = 'transparent'; }}
         >
@@ -94,13 +94,13 @@ export default function Sidebar({ section, onSelectSection, onSelectRecent, rece
         </>
       )}
 
-      <button onClick={() => onSelectSection('settings')} style={{ ...itemStyle(section === 'settings'), marginTop: 'auto' }}
+      <button onClick={() => onSelectSection('settings')} aria-current={section === 'settings' ? 'page' : undefined} style={{ ...itemStyle(section === 'settings'), marginTop: 'auto' }}
         onMouseEnter={e => { if (section !== 'settings') e.currentTarget.style.background = 'var(--bg-hover)'; }}
         onMouseLeave={e => { if (section !== 'settings') e.currentTarget.style.background = 'transparent'; }}
       >
         <SettingsIcon size={scale(16)} color="var(--text-secondary)" />
         <span style={{ color: 'var(--text-secondary)' }}>Settings</span>
       </button>
-    </div>
+    </nav>
   );
 }

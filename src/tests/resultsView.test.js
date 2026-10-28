@@ -70,3 +70,30 @@ describe('ResultsView with a large result', () => {
     expect(root.textContent).toContain('Delete 299 files');
   });
 });
+
+describe('ResultsView keyboard and screen-reader basics', () => {
+  const key = (el, k) => act(() => { el.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true })); });
+
+  it('file rows are focusable checkboxes that Space toggles', () => {
+    const root = renderResults(bigResult(3));                    // 3 groups: expanded by default
+    const row = root.querySelector('[role="checkbox"][aria-label="Delete /t/b0.jpg"]');
+    expect(row).toBeTruthy();
+    expect(row.getAttribute('tabindex')).toBe('0');
+    expect(row.getAttribute('aria-checked')).toBe('true');        // auto-selected
+    key(row, ' ');
+    expect(root.querySelector('[aria-label="Delete /t/b0.jpg"]').getAttribute('aria-checked')).toBe('false');
+    expect(root.textContent).toContain('Delete 2 files');
+  });
+
+  it('the delete confirmation is a modal dialog: focus moves in, Escape closes it', () => {
+    const root = renderResults(bigResult(3));
+    const deleteBtn = Array.from(root.querySelectorAll('button')).find(b => b.textContent === 'Delete 3 files');
+    click(deleteBtn);
+    const dialog = document.querySelector('[role="dialog"][aria-modal="true"]');
+    expect(dialog).toBeTruthy();
+    expect(dialog.getAttribute('aria-labelledby')).toBe('confirm-delete-title');
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    key(document.activeElement, 'Escape');
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+  });
+});

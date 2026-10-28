@@ -96,6 +96,7 @@ export default function VerifyResultsView({ scanResult, scanConfig, onBack }) {
     return (
       <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', overflow: 'hidden', marginBottom: scale(12) }}>
         <button
+          aria-expanded={!!isOpen}
           onClick={() => setOpen(o => ({ ...o, [id]: !o[id] }))}
           style={{ width:'100%', display:'flex', alignItems:'center', justifyContent:'space-between',
                    background:'var(--bg-surface)', border:'none', cursor:'pointer',
@@ -198,6 +199,7 @@ export default function VerifyResultsView({ scanResult, scanConfig, onBack }) {
         value={search}
         onChange={e => setSearch(e.target.value)}
         placeholder="Filter by name or path…"
+        aria-label="Filter by name or path"
         style={{ marginBottom: scale(14), padding:`${scale(8)}px ${scale(12)}px`, fontSize: scale(12),
                  background:'var(--bg-elevated)', border:'1px solid var(--border)', borderRadius:'var(--radius-sm)',
                  color:'var(--text-primary)', outline:'none' }}

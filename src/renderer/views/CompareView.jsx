@@ -61,7 +61,7 @@ function Mark({ state, scale }) {
 
 function Check({ on, onToggle, label, scale }) {
   return (
-    <button aria-label={label} onClick={onToggle}
+    <button role="checkbox" aria-checked={!!on} aria-label={label} onClick={onToggle}
       style={{ width: scale(17), height: scale(17), flexShrink: 0, borderRadius: scale(4),
         border: on ? 'none' : '1px solid var(--border-strong, var(--border))',
         background: on ? 'var(--accent)' : 'transparent', cursor: 'pointer', padding: 0,
@@ -278,7 +278,7 @@ export default function CompareView({ scanResult, scanConfig, onReviewFiles, onB
                 })}
                 label="Select all fully matched folders" />
               <Mark scale={scale} state="all" />
-              <button onClick={() => setFoldersOpen(v => !v)}
+              <button aria-expanded={foldersOpen} onClick={() => setFoldersOpen(v => !v)}
                 style={{ display: 'flex', alignItems: 'center', gap: scale(10), flex: 1, background: 'none', border: 'none', font: 'inherit', color: 'inherit', cursor: 'pointer', textAlign: 'left', padding: 0 }}>
                 {foldersOpen ? <ChevronDownIcon size={scale(14)} /> : <ChevronRightIcon size={scale(14)} />}
                 <span style={{ flex: 1 }}>{fullyDup.length.toLocaleString()} folders fully {isQuick ? 'name-matched' : 'duplicated'}</span>

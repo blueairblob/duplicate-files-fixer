@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { useDPR } from '../contexts/DPRContext.jsx';
+import { useDialog } from '../hooks/useDialog.js';
 import {
   ShieldIcon, SearchIcon, ChevronDownIcon, ChevronRightIcon, ChevronLeftIcon, CheckCircleIcon,
   ImageIcon, FilmIcon, MusicIcon, FileIcon, ArchiveIcon,
@@ -38,7 +39,7 @@ function EmptyFilesCard({ files, scale }) {
   const shown = files.slice(0, 300);
   return (
     <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', marginTop: scale(6), overflow: 'hidden', width: '100%' }}>
-      <button onClick={() => setOpen(v => !v)} style={{ width: '100%', textAlign: 'left', background: 'transparent', padding: `${scale(10)}px ${scale(14)}px`, display: 'flex', alignItems: 'center', gap: scale(8) }}>
+      <button aria-expanded={open} onClick={() => setOpen(v => !v)} style={{ width: '100%', textAlign: 'left', background: 'transparent', padding: `${scale(10)}px ${scale(14)}px`, display: 'flex', alignItems: 'center', gap: scale(8) }}>
         <span style={{ fontSize: 'var(--fs-secondary)', color: 'var(--text-primary)', flex: 1 }}>
           {files.length.toLocaleString()} empty file{files.length !== 1 ? 's' : ''} (0 bytes) — listed for reference, not deleted
         </span>
@@ -75,6 +76,7 @@ const GroupCard = React.memo(function GroupCard({ group, markedMask, isExpanded,
     }}>
       {/* Group header */}
       <button
+        aria-expanded={isExpanded}
         onClick={() => onToggleExpand(group.id)}
         style={{
           width: '100%', textAlign: 'left', background: 'transparent',
@@ -112,6 +114,12 @@ const GroupCard = React.memo(function GroupCard({ group, markedMask, isExpanded,
         return (
           <div
             key={file.path}
+            role="checkbox"
+            aria-checked={isMarked}
+            aria-disabled={isProtected || undefined}
+            aria-label={`${isProtected ? 'Protected, can never be deleted: ' : 'Delete '}${file.path}`}
+            tabIndex={isProtected ? -1 : 0}
+            onKeyDown={e => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); onToggleFile(file.path, isProtected); } }}
             onClick={() => onToggleFile(file.path, isProtected)}
             style={{
               padding: `${scale(8)}px ${scale(14)}px`,
@@ -159,6 +167,26 @@ const GroupCard = React.memo(function GroupCard({ group, markedMask, isExpanded,
     </div>
   );
 });
+
+// Modal confirmation: dialog semantics, Escape to cancel, focus kept inside.
+function ConfirmDialog({ onClose, scale, children }) {
+  const ref = useDialog(onClose);
+  return (
+    <div onClick={onClose} style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+    }}>
+      <div ref={ref} role="dialog" aria-modal="true" aria-labelledby="confirm-delete-title" tabIndex={-1}
+        onClick={e => e.stopPropagation()} style={{
+          background: 'var(--bg-card)', border: '1px solid var(--border)',
+          borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-sheet)',
+          padding: scale(24), width: scale(400), maxWidth: '90vw',
+        }}>
+        {children}
+      </div>
+    </div>
+  );
+}
 
 export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, onBack, selection = null, backLabel = null, selectionLabel = null }) {
   const { scale } = useDPR();
@@ -368,6 +396,7 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
           <div style={{ position: 'relative' }}>
             <SearchIcon size={scale(14)} color="var(--text-muted)" style={{ position: 'absolute', left: scale(9), top: '50%', transform: 'translateY(-50%)' }} />
             <input
+              aria-label="Search files"
               placeholder="Search"
               value={search}
               onChange={e => setSearch(e.target.value)}
@@ -407,6 +436,7 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
               borderRadius: 'var(--radius-md)', marginTop: scale(6), overflow: 'hidden',
             }}>
               <button
+                aria-expanded={warningsOpen}
                 onClick={() => setWarningsOpen(v => !v)}
                 style={{
                   width: '100%', textAlign: 'left', background: 'transparent',
@@ -497,64 +527,52 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
 
       {/* ── Confirm modal ── */}
       {confirmOpen && (
-        <div
-          onClick={() => setConfirmOpen(false)}
-          style={{
-            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
-          }}
-        >
-          <div onClick={e => e.stopPropagation()} style={{
-            background: 'var(--bg-card)', border: '1px solid var(--border)',
-            borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-sheet)',
-            padding: scale(24), width: scale(400), maxWidth: '90vw',
-          }}>
-            <h2 style={{ fontSize: 'var(--fs-heading)', fontWeight: 600, marginBottom: scale(6) }}>
-              Delete {markedCount.toLocaleString()} file{markedCount !== 1 ? 's' : ''}?
-            </h2>
-            <p style={{ fontSize: 'var(--fs-secondary)', color: 'var(--text-secondary)', marginBottom: scale(16) }}>
-              {formatSize(markedBytes)} will be moved to the Recycle Bin, or to a recovery folder on the same
-              drive when the Recycle Bin can't take it. Each file is first checked against its kept copy;
-              anything that no longer matches is left alone.
-            </p>
+        <ConfirmDialog onClose={() => setConfirmOpen(false)} scale={scale}>
+          <h2 id="confirm-delete-title" style={{ fontSize: 'var(--fs-heading)', fontWeight: 600, marginBottom: scale(6) }}>
+            Delete {markedCount.toLocaleString()} file{markedCount !== 1 ? 's' : ''}?
+          </h2>
+          <p style={{ fontSize: 'var(--fs-secondary)', color: 'var(--text-secondary)', marginBottom: scale(16) }}>
+            {formatSize(markedBytes)} will be moved to the Recycle Bin, or to a recovery folder on the same
+            drive when the Recycle Bin can't take it. Each file is first checked against its kept copy;
+            anything that no longer matches is left alone.
+          </p>
 
-            {noSurvivorGroups.length > 0 && (
-              <div style={{
-                background: 'var(--danger-tint)', borderRadius: 'var(--radius-sm)',
-                padding: `${scale(12)}px ${scale(14)}px`, marginBottom: scale(16),
-              }}>
-                <p style={{ fontSize: 'var(--fs-secondary)', color: 'var(--danger)', fontWeight: 500, marginBottom: scale(4) }}>
-                  No copy will remain
-                </p>
-                <p style={{ fontSize: 'var(--fs-caption)', color: 'var(--text-secondary)', lineHeight: 1.5, marginBottom: scale(10) }}>
-                  {noSurvivorGroups.length} group{noSurvivorGroups.length !== 1 ? 's have' : ' has'} every copy selected —
-                  after this delete there will be no remaining copy of {noSurvivorGroups.length !== 1 ? 'those files' : 'that file'}.
-                </p>
-                <label style={{ display: 'flex', alignItems: 'center', gap: scale(8), cursor: 'pointer' }}>
-                  <input type="checkbox" checked={ackWipeout} onChange={e => setAckWipeout(e.target.checked)} />
-                  <span style={{ fontSize: 'var(--fs-caption)', color: 'var(--text-primary)' }}>
-                    I understand this removes the only remaining copies
-                  </span>
-                </label>
-              </div>
-            )}
-
-            <div style={{ display: 'flex', gap: scale(10), justifyContent: 'flex-end' }}>
-              <button onClick={() => setConfirmOpen(false)} style={btnSecondary}>Cancel</button>
-              <button
-                onClick={handleDelete}
-                disabled={noSurvivorGroups.length > 0 && !ackWipeout}
-                style={{
-                  background: 'var(--danger)', color: '#fff',
-                  borderRadius: 'var(--radius-sm)', fontWeight: 500,
-                  fontSize: 'var(--fs-secondary)', padding: `${scale(8)}px ${scale(18)}px`,
-                  opacity: (noSurvivorGroups.length > 0 && !ackWipeout) ? 0.4 : 1,
-                  cursor: (noSurvivorGroups.length > 0 && !ackWipeout) ? 'not-allowed' : 'pointer',
-                }}
-              >Delete</button>
+          {noSurvivorGroups.length > 0 && (
+            <div style={{
+              background: 'var(--danger-tint)', borderRadius: 'var(--radius-sm)',
+              padding: `${scale(12)}px ${scale(14)}px`, marginBottom: scale(16),
+            }}>
+              <p style={{ fontSize: 'var(--fs-secondary)', color: 'var(--danger)', fontWeight: 500, marginBottom: scale(4) }}>
+                No copy will remain
+              </p>
+              <p style={{ fontSize: 'var(--fs-caption)', color: 'var(--text-secondary)', lineHeight: 1.5, marginBottom: scale(10) }}>
+                {noSurvivorGroups.length} group{noSurvivorGroups.length !== 1 ? 's have' : ' has'} every copy selected —
+                after this delete there will be no remaining copy of {noSurvivorGroups.length !== 1 ? 'those files' : 'that file'}.
+              </p>
+              <label style={{ display: 'flex', alignItems: 'center', gap: scale(8), cursor: 'pointer' }}>
+                <input type="checkbox" checked={ackWipeout} onChange={e => setAckWipeout(e.target.checked)} />
+                <span style={{ fontSize: 'var(--fs-caption)', color: 'var(--text-primary)' }}>
+                  I understand this removes the only remaining copies
+                </span>
+              </label>
             </div>
+          )}
+
+          <div style={{ display: 'flex', gap: scale(10), justifyContent: 'flex-end' }}>
+            <button onClick={() => setConfirmOpen(false)} style={btnSecondary}>Cancel</button>
+            <button
+              onClick={handleDelete}
+              disabled={noSurvivorGroups.length > 0 && !ackWipeout}
+              style={{
+                background: 'var(--danger)', color: '#fff',
+                borderRadius: 'var(--radius-sm)', fontWeight: 500,
+                fontSize: 'var(--fs-secondary)', padding: `${scale(8)}px ${scale(18)}px`,
+                opacity: (noSurvivorGroups.length > 0 && !ackWipeout) ? 0.4 : 1,
+                cursor: (noSurvivorGroups.length > 0 && !ackWipeout) ? 'not-allowed' : 'pointer',
+              }}
+            >Delete</button>
           </div>
-        </div>
+        </ConfirmDialog>
       )}
     </div>
   );

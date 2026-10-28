@@ -93,8 +93,12 @@ export default function ScanView({ scanConfig, progress, startedAt, cancelling, 
       }}>
 
         {/* Progress ring */}
-        <div style={{ position: 'relative', width: scale(160), height: scale(160) }}>
-          <svg width={scale(160)} height={scale(160)} viewBox="0 0 160 160">
+        <div role="progressbar" aria-label={phaseTitle}
+          aria-valuemin={hasDeterminate ? 0 : undefined} aria-valuemax={hasDeterminate ? 100 : undefined}
+          aria-valuenow={hasDeterminate ? Math.round(progressFraction * 100) : undefined}
+          aria-valuetext={hasDeterminate ? `${scanned.toLocaleString()} of ${total.toLocaleString()}` : `${scanned.toLocaleString()} ${counterLabel}`}
+          style={{ position: 'relative', width: scale(160), height: scale(160) }}>
+          <svg aria-hidden="true" width={scale(160)} height={scale(160)} viewBox="0 0 160 160">
             <circle cx="80" cy="80" r={RADIUS} fill="none" stroke="var(--bg-inset)" strokeWidth="7"/>
             <circle cx="80" cy="80" r={RADIUS} fill="none" stroke="var(--accent)" strokeWidth="7"
               strokeDasharray={`${arc} ${CIRC}`} strokeLinecap="round"
@@ -120,7 +124,7 @@ export default function ScanView({ scanConfig, progress, startedAt, cancelling, 
 
         {/* Heading */}
         <div style={{ textAlign: 'center' }}>
-          <h1 style={{ fontSize: 'var(--fs-title)', fontWeight: 500, marginBottom: scale(4) }}>{phaseTitle}</h1>
+          <h1 aria-live="polite" style={{ fontSize: 'var(--fs-title)', fontWeight: 500, marginBottom: scale(4) }}>{phaseTitle}</h1>
           <p style={{ fontSize: 'var(--fs-body)', color: 'var(--text-secondary)' }}>{phaseHint}</p>
         </div>
 

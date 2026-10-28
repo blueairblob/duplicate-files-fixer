@@ -79,7 +79,7 @@ function FolderZone({ label, sublabel, Icon, iconColor, folders, onAddPath, onRe
                 flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                 direction: 'rtl', textAlign: 'left', /* ellipsize the start, keep the leaf folder visible */
               }}>{f}</span>
-              <button onClick={() => onRemove(f)} style={{ background: 'transparent', color: 'var(--text-muted)', display: 'flex' }}>
+              <button onClick={() => onRemove(f)} aria-label={`Remove ${f}`} title="Remove" style={{ background: 'transparent', color: 'var(--text-muted)', display: 'flex' }}>
                 <XIcon size={scale(13)} />
               </button>
             </div>
@@ -241,7 +241,7 @@ export default function HomeView({ onStartScan, preset = null }) {
           {modes.map(({ id, label }) => {
             const active = mode === id;
             return (
-              <button key={id} onClick={() => setMode(id)} title={
+              <button key={id} onClick={() => setMode(id)} aria-pressed={active} title={
                 id === 'compare' ? 'Protected source vs. target — recommended'
                 : id === 'simple' ? 'Find all duplicates within a folder set'
                 : 'Check every source file is present in the backup'

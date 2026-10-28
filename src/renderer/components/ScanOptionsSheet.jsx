@@ -1,3 +1,4 @@
+import { useDialog } from '../hooks/useDialog.js';
 import React from 'react';
 import { useDPR } from '../contexts/DPRContext.jsx';
 import { XIcon, CheckCircleIcon } from './icons.jsx';
@@ -39,6 +40,8 @@ export default function ScanOptionsSheet({
     color: 'var(--text-primary)', margin: `0 0 ${scale(8)}px`,
   };
 
+  const dialogRef = useDialog(onClose);
+
   return (
     <div
       onClick={onClose}
@@ -49,6 +52,7 @@ export default function ScanOptionsSheet({
       }}
     >
       <div
+        ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="scan-options-title" tabIndex={-1}
         onClick={e => e.stopPropagation()}
         style={{
           width: scale(440), maxWidth: '90vw', maxHeight: '85vh', overflowY: 'auto',
@@ -61,8 +65,8 @@ export default function ScanOptionsSheet({
           padding: `${scale(14)}px ${scale(18)}px`,
           borderBottom: '1px solid var(--border)',
         }}>
-          <span style={{ flex: 1, fontSize: 'var(--fs-heading)', fontWeight: 500 }}>Scan options</span>
-          <button onClick={onClose} style={{ background: 'transparent', color: 'var(--text-muted)', display: 'flex' }}>
+          <span id="scan-options-title" style={{ flex: 1, fontSize: 'var(--fs-heading)', fontWeight: 500 }}>Scan options</span>
+          <button onClick={onClose} aria-label="Close" style={{ background: 'transparent', color: 'var(--text-muted)', display: 'flex' }}>
             <XIcon size={scale(16)} />
           </button>
         </div>

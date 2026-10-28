@@ -30,6 +30,7 @@ export default function TitleBar({ title = 'Duplicate Files Fixer', onToggleSide
       <button
         onClick={onToggleSidebar}
         title="Show or hide sidebar"
+        aria-label="Show or hide sidebar"
         style={{ ...winBtn, WebkitAppRegion: 'no-drag' }}
         onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-hover)'}
         onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
@@ -45,11 +46,11 @@ export default function TitleBar({ title = 'Duplicate Files Fixer', onToggleSide
       {api ? (
         <div style={{ display: 'flex', gap: scale(2), WebkitAppRegion: 'no-drag' }}>
           {[
-            { label: '–', action: () => api.windowMinimize() },
-            { label: '□', action: () => api.windowMaximize() },
-            { label: '×', action: () => api.windowClose(), danger: true },
-          ].map(({ label, action, danger }) => (
-            <button key={label} onClick={action}
+            { label: '–', name: 'Minimize', action: () => api.windowMinimize() },
+            { label: '□', name: 'Maximize', action: () => api.windowMaximize() },
+            { label: '×', name: 'Close', action: () => api.windowClose(), danger: true },
+          ].map(({ label, name, action, danger }) => (
+            <button key={label} onClick={action} aria-label={name} title={name}
               style={{ ...winBtn, fontSize: label === '□' ? scale(10) : scale(14) }}
               onMouseEnter={e => {
                 e.currentTarget.style.background = danger ? 'var(--danger)' : 'var(--bg-hover)';

@@ -13,6 +13,7 @@
  *   onClose    fn()    — called when the panel is dismissed
  */
 import React, { useEffect, useState } from 'react';
+import { useDialog } from '../hooks/useDialog.js';
 import { useDPR } from '../contexts/DPRContext.jsx';
 
 const api = window.electronAPI;
@@ -100,6 +101,8 @@ export default function FolderBrowserModal({ title, accent, onConfirm, onClose }
     }))
     .filter(g => g.items.length > 0);
 
+  const dialogRef = useDialog(onClose);
+
   return (
     /* Backdrop */
     <div
@@ -113,6 +116,7 @@ export default function FolderBrowserModal({ title, accent, onConfirm, onClose }
     >
       {/* Panel */}
       <div
+        ref={dialogRef} role="dialog" aria-modal="true" aria-label={title || 'Choose a location'} tabIndex={-1}
         onClick={e => e.stopPropagation()}
         style={{
           background: 'var(--bg-elevated)',
