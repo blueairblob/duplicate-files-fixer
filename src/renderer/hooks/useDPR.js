@@ -44,8 +44,29 @@ export function makeScale(dpr) {
  * (--dpr-base-font, --dpr-scale) so plain CSS rules in index.css can react too,
  * without every component needing to re-derive them.
  */
+// Default: the OS scales the app, as it does every other desktop app, so
+// scale() is 1:1. The old behaviour — shrinking text further on HiDPI screens —
+// is kept as an opt-in "legacy" setting (Settings → Display) in case OS
+// scaling looks wrong somewhere.
+const LEGACY_KEY = 'dff-legacy-dpr-scaling';
+const LEGACY_EVENT = 'dff-legacy-dpr-scaling-change';
+
+export function getLegacyScaling() {
+  try { return localStorage.getItem(LEGACY_KEY) === '1'; } catch { return false; }
+}
+export function setLegacyScaling(on) {
+  try { localStorage.setItem(LEGACY_KEY, on ? '1' : '0'); } catch { /* non-fatal */ }
+  window.dispatchEvent(new Event(LEGACY_EVENT));
+}
+
 export function useDPRValue() {
   const [dpr, setDpr] = useState(() => window.devicePixelRatio || 1);
+  const [legacy, setLegacy] = useState(getLegacyScaling);
+  useEffect(() => {
+    const onChange = () => setLegacy(getLegacyScaling());
+    window.addEventListener(LEGACY_EVENT, onChange);
+    return () => window.removeEventListener(LEGACY_EVENT, onChange);
+  }, []);
 
   useEffect(() => {
     // devicePixelRatio doesn't fire a change event itself; the documented way to
@@ -68,7 +89,7 @@ export function useDPRValue() {
     return () => mql?.removeEventListener('change', onChange);
   }, []);
 
-  const tier = resolveTier(dpr);
+  const tier = legacy ? resolveTier(dpr) : DPR_TIERS[0];
   const factor = tier.baseFont / REFERENCE_FONT;
 
   useEffect(() => {
@@ -79,5 +100,5 @@ export function useDPRValue() {
 
   const scale = useCallback((px) => Math.round(px * factor * 100) / 100, [factor]);
 
-  return { dpr, tier, factor, scale };
+  return { dpr, tier, factor, scale, legacyScaling: legacy };
 }

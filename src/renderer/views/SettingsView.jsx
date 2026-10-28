@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useDPR } from '../contexts/DPRContext.jsx';
 import { getTheme, applyTheme } from '../utils/theme.js';
+import { setLegacyScaling } from '../hooks/useDPR.js';
 
 const THEMES = [
   { id: 'system', label: 'System' },
@@ -9,7 +10,7 @@ const THEMES = [
 ];
 
 export default function SettingsView() {
-  const { scale } = useDPR();
+  const { scale, legacyScaling, dpr } = useDPR();
   const [theme, setTheme] = useState(getTheme());
   const [cache, setCache] = useState(null);
   const [clearing, setClearing] = useState(false);
@@ -70,6 +71,30 @@ export default function SettingsView() {
               );
             })}
           </div>
+        </div>
+
+        <div style={{
+          background: 'var(--bg-card)', border: '1px solid var(--border)',
+          borderRadius: 'var(--radius-md)', padding: `${scale(14)}px ${scale(16)}px`,
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          gap: scale(16), marginTop: scale(12),
+        }}>
+          <div style={{ minWidth: 0 }}>
+            <p id="legacy-scaling-label" style={{ fontSize: 'var(--fs-secondary)', fontWeight: 500, margin: 0 }}>Smaller text on high-resolution screens</p>
+            <p style={{ fontSize: 'var(--fs-caption)', color: 'var(--text-muted)', margin: `${scale(1)}px 0 0` }}>
+              Off: the system scales the app like any other (recommended). On: the app's older,
+              more compact sizing{dpr > 1 ? ` — this screen is at ${Math.round(dpr * 100)}%` : ''}.
+            </p>
+          </div>
+          <button role="switch" aria-checked={legacyScaling} aria-labelledby="legacy-scaling-label"
+            onClick={() => setLegacyScaling(!legacyScaling)}
+            style={{
+              width: scale(38), height: scale(22), borderRadius: scale(11), flexShrink: 0, padding: scale(2),
+              background: legacyScaling ? 'var(--accent)' : 'var(--bg-inset)',
+              border: '1px solid var(--border)', display: 'flex', justifyContent: legacyScaling ? 'flex-end' : 'flex-start',
+            }}>
+            <span style={{ width: scale(16), height: scale(16), borderRadius: '50%', background: '#fff', boxShadow: 'var(--shadow-card)' }} />
+          </button>
         </div>
 
         <div style={{
