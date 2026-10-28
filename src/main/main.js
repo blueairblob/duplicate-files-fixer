@@ -34,6 +34,15 @@ const WORKER_PATH = path.join(__dirname, 'scanWorker.js').replace(`app.asar${pat
 // DFF_SMOKE=1: load the built page in a hidden window, run one real scan,
 // print the result and exit (used by `npm run smoke` and CI).
 const SMOKE = process.env.DFF_SMOKE === '1';
+// The smoke test gets its own throwaway userData (cache, exclusions,
+// quarantine registry), so running it never touches the real app's state.
+// Electron keeps this folder locked while running, so it's emptied at the
+// start of the next run rather than at exit.
+const SMOKE_USERDATA = SMOKE ? path.join(os.tmpdir(), 'dff-smoke-userdata') : null;
+if (SMOKE) {
+  try { fs.rmSync(SMOKE_USERDATA, { recursive: true, force: true }); } catch { /* still locked by an old run */ }
+  app.setPath('userData', SMOKE_USERDATA);
+}
 const isAppUrl = makeAppUrlCheck({ isDev, devUrl: DEV_URL, indexPath: INDEX_PATH });
 
 // IPC only from the app's own page. Wraps ipcMain.handle / ipcMain.on.
@@ -120,8 +129,10 @@ app.whenReady().then(() => {
 
 // ── Smoke test (DFF_SMOKE=1) ─────────────────────────────────────────────────
 // Proves a build works end to end without anyone looking at it: the page
-// renders under the sandbox + CSP, the preload bridge is there, and the scan
-// worker loads (from app.asar.unpacked when packaged) and finds a duplicate.
+// renders under the sandbox + CSP with the preload bridge and without Node,
+// and the page drives the real IPC handlers — root checks, a compare scan (the
+// worker loads from app.asar.unpacked when packaged), a delete the guard must
+// partly refuse, quarantine listing and restore.
 async function runSmoke() {
   const report = { packaged: app.isPackaged, errors: [] };
   const win = createWindow();
@@ -145,22 +156,55 @@ async function runSmoke() {
     await new Promise(r => setTimeout(r, 100));
   }
 
+  // Drive the real preload bridge and IPC handlers from the page, the way the
+  // UI does: root checks, a compare scan, a delete the guard must partly
+  // refuse, then the quarantine listing and a restore.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dff-smoke-'));
+  const P = {
+    dir,
+    src: path.join(dir, 'src'),
+    tgt: path.join(dir, 'tgt'),
+    srcA: path.join(dir, 'src', 'a.jpg'),
+    tgtCopy: path.join(dir, 'tgt', 'a copy.jpg'),
+  };
   try {
-    fs.writeFileSync(path.join(dir, 'a.jpg'), 'same bytes');
-    fs.writeFileSync(path.join(dir, 'a copy.jpg'), 'same bytes');
-    fs.writeFileSync(path.join(dir, 'b.jpg'), 'different');
-    report.scan = await new Promise((resolve) => {
-      const w = new Worker(WORKER_PATH, { workerData: { mode: 'simple', protectedFolders: [], targetFolders: [dir], filters: {}, exclusions: [], confidence: 'thorough', cachePath: null, platform: process.platform } });
-      w.on('message', (m) => { if (m.type === 'done' || m.type === 'error') { resolve(m.type === 'done' ? { groups: m.result.groups.length, files: m.result.totalScanned } : { error: m.message }); w.terminate(); } });
-      w.on('error', (e) => resolve({ error: e.message }));
-    });
+    fs.mkdirSync(P.src); fs.mkdirSync(P.tgt);
+    fs.writeFileSync(P.srcA, 'same bytes');
+    fs.writeFileSync(P.tgtCopy, 'same bytes');
+    fs.writeFileSync(path.join(P.tgt, 'b.jpg'), 'different');
+
+    report.ipc = await win.webContents.executeJavaScript(`(async () => {
+      const P = ${JSON.stringify(P)};
+      const api = window.electronAPI;
+      const out = {};
+      const overlap = await api.checkRoots({ mode: 'compare', protectedFolders: [P.dir], targetFolders: [P.src] });
+      out.overlapBlocked = overlap.blocked.length === 1;
+      const scan = await api.startScan({ mode: 'compare', protectedFolders: [P.src], targetFolders: [P.tgt], filters: {}, confidence: 'standard', autoMarkRule: 'protected-wins' });
+      out.groups = scan.groups.length;
+      out.census = !!scan.census && scan.census.matched.targetFiles === 1;
+      const del = await api.deleteFiles({ files: [{ path: P.srcA }, { path: P.tgtCopy }] });
+      out.protectedRefused = del.skipped.some(s => s.path === P.srcA && /Protected/.test(s.reason));
+      out.quarantined = del.quarantined.length === 1 && del.quarantined[0] === P.tgtCopy && del.trashed.length === 0;
+      if (!out.quarantined) out.deleteResult = { trashed: del.trashed, quarantined: del.quarantined, skipped: del.skipped, failed: del.failed };
+      const list = await api.getQuarantineManifest();
+      const entry = list.find(e => e.originalPath === P.tgtCopy);
+      out.listed = !!entry;
+      out.restored = entry ? (await api.restoreFromQuarantine(entry.quarantinePath)).success === true : false;
+      const ex = await api.getExclusions();
+      out.exclusions = Array.isArray(ex) && ex.length > 0;
+      return out;
+    })()`).catch(e => ({ error: e.message }));
+    report.ipc.filesBack = fs.existsSync(P.srcA) && fs.existsSync(P.tgtCopy);
+    report.scan = { groups: report.ipc.groups };
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 
+  const ipc = report.ipc || {};
+  const ipcOk = ipc.overlapBlocked && ipc.groups === 1 && ipc.census && ipc.protectedRefused
+    && ipc.quarantined && ipc.listed && ipc.restored && ipc.exclusions && ipc.filesBack;
   const ok = !!(report.page && report.page.rendered && report.page.bridge && report.page.nodeHidden
-    && (isDev || report.page.csp) && report.scan && report.scan.groups === 1 && report.errors.length === 0);
+    && (isDev || report.page.csp) && ipcOk && report.errors.length === 0);
   console.log('[smoke] ' + JSON.stringify(report));
   console.log(`[smoke] ${ok ? 'PASS' : 'FAIL'}`);
   // Packaged Windows builds are GUI programs with no console; DFF_SMOKE_OUT
@@ -324,7 +368,10 @@ function getDeleteService() {
     deleteService = createDeleteService({
       userDataDir: app.getPath('userData'),
       homeDir: os.homedir(),
-      trash: (p) => shell.trashItem(p),
+      // Smoke test: no Recycle Bin, and quarantine only inside the scan root
+      // (its temp folder) — never the volume root or home folder.
+      trash: SMOKE ? () => Promise.reject(new Error('smoke test: Recycle Bin disabled')) : (p) => shell.trashItem(p),
+      quarantineDirsFor: SMOKE ? (_p, file) => [path.join(file.root, '.dff-quarantine')] : undefined,
     });
   }
   return deleteService;

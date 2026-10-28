@@ -49,6 +49,12 @@ describe('planDeletion', () => {
     expect(r.items.map(i => i.counterpart)).toEqual(['D:\\Photos\\a.jpg', 'D:\\Photos\\a.jpg']);
   });
 
+  it('still deletes a target copy when the request also (wrongly) names its protected original', () => {
+    const r = planDeletion(['D:\\Photos\\a.jpg', 'E:\\Backup\\a.jpg'], session(groups));
+    expect(r.rejected.map(x => x.reason)).toEqual(['Protected file — never deleted']);
+    expect(r.items.map(i => [i.path, i.counterpart])).toEqual([['E:\\Backup\\a.jpg', 'D:\\Photos\\a.jpg']]);
+  });
+
   it('refuses to remove every copy unless acknowledged', () => {
     const s = session(groups);
     const both = ['E:\\x\\b.jpg', 'E:\\y\\b.jpg'];

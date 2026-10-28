@@ -44,10 +44,13 @@ function planDeletion(requestPaths, session, { allowNoSurvivor = false } = {}) {
     return { items: [], rejected: unique.map(path => ({ path, reason: 'Scan results are out of date — run the scan again' })) };
   }
 
-  const requested = new Set(unique);
   const items = [];
   const rejected = [];
 
+  // First drop what can never be deleted. Only the rest counts as "going
+  // away" when checking that each group keeps a copy — a protected file in
+  // the request is refused, so it still survives.
+  const eligible = [];
   for (const path of unique) {
     const file = session.files.get(path);
     if (!file) { rejected.push({ path, reason: 'Not part of the current scan results' }); continue; }
@@ -55,7 +58,12 @@ function planDeletion(requestPaths, session, { allowNoSurvivor = false } = {}) {
       rejected.push({ path, reason: 'Protected file — never deleted' });
       continue;
     }
+    eligible.push(path);
+  }
+  const requested = new Set(eligible);
 
+  for (const path of eligible) {
+    const file = session.files.get(path);
     const survivors = (session.groups.get(file.groupId) || []).filter(p => p !== path && !requested.has(p));
     if (survivors.length === 0 && !allowNoSurvivor) {
       rejected.push({ path, reason: 'Would remove every copy — not deleted' });

@@ -32,8 +32,10 @@ function hashFull(p) {
  *   userDataDir  where the signature cache and quarantine registry live
  *   homeDir      last-resort quarantine location (and the legacy one)
  *   trash(p)     OS Recycle Bin (Electron's shell.trashItem)
+ *   quarantineDirsFor(p, file)  optional: override where quarantine may go
+ *                (the smoke test keeps it inside its own temp folder)
  */
-function createDeleteService({ userDataDir, homeDir, trash }) {
+function createDeleteService({ userDataDir, homeDir, trash, quarantineDirsFor }) {
   const sigCachePath = path.join(userDataDir, 'dff-signature-cache.json');
   const registryPath = path.join(userDataDir, 'dff-quarantine-dirs.json');
   const legacyDir = path.join(homeDir, '.dff-quarantine');
@@ -83,7 +85,7 @@ function createDeleteService({ userDataDir, homeDir, trash }) {
       hash,
       trash,
       quarantine: async (p, file) => {
-        const r = await quarantineFile(p, { scanRoot: file.root, homeDir });
+        const r = await quarantineFile(p, { scanRoot: file.root, homeDir, dirs: quarantineDirsFor ? quarantineDirsFor(p, file) : undefined });
         try { await rememberDir(r.dir); } catch (e) { console.error('[delete] could not record quarantine folder', r.dir, e.message); }
         return r;
       },
