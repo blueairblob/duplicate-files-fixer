@@ -360,3 +360,19 @@ Still open (each needs a decision or an account from you):
 - **Licensing:** free/pro tiers (PLAN.md Sprint 5).
 - **HiDPI scaling design:** text shrinks on high-DPI screens and with Ctrl+zoom. This is a UX decision, not a bug fix.
 - **macOS:** builds aren't verified on real hardware; CI covers the build and smoke test only.
+
+---
+
+## Phase E — status
+
+Done on branch `phase-e-polish`:
+- **Self-test drives the real IPC path.** In smoke mode the page calls root checks, a compare scan, a delete that includes a protected path, the quarantine listing and a restore, all through the preload bridge. It uses an isolated userData folder, and its quarantine stays inside its temp folder. CI runs it on every push.
+- **Bug found and fixed by that test:** when a delete request included a protected file, the guard refused it correctly. But it still counted that file as "going away", so it also refused the valid target copy as "would remove every copy". Covered by a unit test now.
+- **Accessibility:**
+  - Keyboard focus is visible again; it had been switched off app-wide.
+  - File rows are keyboard-operable checkboxes.
+  - The three modals are real dialogs (focus in, Tab trapped, Escape closes).
+  - Icon-only buttons have names, collapsible sections report their state, and scan progress is announced.
+  - Not yet reviewed: colour contrast, and a screen-reader run on real hardware.
+- **HiDPI:** the OS scales the app; the old shrink is an off-by-default Settings toggle.
+- **Housekeeping:** PLAN.md rewritten as the current roadmap with the product decisions; TESTING.md added; merged local branches deleted.

@@ -56,7 +56,8 @@ Three process layers:
 - **Persistence:** exclusions persist in `userData/dff-exclusions.json` (defaults in `exclusions.js`; name/glob entries match only below the scan root; path prefixes need a folder boundary). Scan options, history (`utils/scanHistory.js`) and theme (`utils/theme.js`) use renderer `localStorage`.
 - **Deletes run as a job:** `executeDeletion` checks up to 4 files at once but moves them one at a time; `files:cancelDelete` stops it, and network files are always content-compared at delete time.
 - **Results screen:** groups render 200 per page via the memoized `GroupCard`, and start collapsed above 50 groups. Keep per-click work proportional to what changed.
-- **Styling:** design tokens as CSS variables in `index.css` (light/dark via `data-theme`). HiDPI scaling via `useDPR` / `DPRContext`; use its `scale(px)` for inline sizes authored at the 13px/1.0 baseline.
+- **Styling:** design tokens as CSS variables in `index.css` (light/dark via `data-theme`). Use `scale(px)` from `useDPR` for inline sizes. It is 1:1 by default, since the OS handles HiDPI; the old compact sizing only applies when the Settings toggle is on.
+- **Accessibility:** keyboard focus must stay visible (`:focus-visible` in index.css). Clickable rows need a role, `tabIndex` and a Space/Enter handler. Modals use `useDialog` (focus in, Tab trapped, Escape closes) with `role="dialog"`.
 
 ### Performance constraints (NAS scanning)
 
@@ -74,4 +75,4 @@ Every suite imports real source: `scanCore`, `scanWorker` (spawns the real worke
 
 ## Plans
 
-`REVIEW.md` holds the full review and the phased fix plan, with status notes at the end (Phases A–C merged to `main`; Phase D on `phase-d-ship`). `PLAN.md` is the original sprint plan and predates REVIEW.md.
+`REVIEW.md` holds the full review and the phased fix plan, with status notes at the end (Phases A–D merged to `main`; Phase E on `phase-e-polish`). `PLAN.md` is the short roadmap with the user's product decisions (no code signing yet, no crash reporting, free + donation link, OS-native HiDPI scaling). `TESTING.md` is the manual real-world checklist.

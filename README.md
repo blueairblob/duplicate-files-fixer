@@ -223,4 +223,4 @@ node tools/run-smoke.js   # smoke-test the packaged app under release/
 
 ## Roadmap
 
-See `PLAN.md` for the full roadmap (Sprints 2–5), including the enhanced cross-platform folder browser and the platform-aware location detection rewrite.
+See `PLAN.md` for the roadmap and product decisions, `REVIEW.md` for the code review behind Phases A–E, and `TESTING.md` for the hands-on test checklist.
