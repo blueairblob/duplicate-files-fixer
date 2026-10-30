@@ -24,6 +24,7 @@ const { checkRoots } = require(path.join(SRC, 'system'));
 const { buildSession, planDeletion } = require(path.join(SRC, 'deleteGuard'));
 const { createDeleteService, statForDelete, hashFull } = require(path.join(SRC, 'deleteService'));
 const { executeCopy } = require(path.join(SRC, 'copyFiles'));
+const { serializeRecord, parseRecord, compareRecord } = require(path.join(SRC, 'integrity'));
 
 const [mappedRoot, uncRoot] = process.argv.slice(2).filter(a => !a.startsWith('--'));
 if (!mappedRoot || !uncRoot) {
@@ -214,6 +215,32 @@ async function main() {
   check('10 move: free-up removed both local copies, backup untouched',
     fr.deleted.length === 2 && !(await exists(path.join(LOCAL, 'phone', 'DCIM', 'p-new.jpg'))) && (await exists(landed)),
     JSON.stringify({ deleted: fr.deleted.length, skipped: fr.skipped, failed: fr.failed }));
+
+  // ── 11. Archive backup: NAS → local archive, integrity record, re-check ──
+  const archiveDir = path.join(LOCAL, 'archive');
+  await fsp.mkdir(archiveDir, { recursive: true });
+  const ar = await runScan({ mode: 'compare', job: 'archive', protectedFolders: [archiveDir], targetFolders: [dupes], confidence: 'thorough' });
+  const acp = await executeCopy(ar.move.newFiles, { toRoot: archiveDir, layout: 'folders' }, {
+    exists, mkdir: (d) => fsp.mkdir(d, { recursive: true }), copyFile: (a, b) => fsp.copyFile(a, b, fs.constants.COPYFILE_EXCL),
+    hash: hashFull, rename: (a, b) => fsp.rename(a, b), remove: (p) => fsp.rm(p, { force: true }),
+    setTimes: (p, iso) => fsp.utimes(p, new Date(iso), new Date(iso)),
+  });
+  const measure = () => new Promise((resolve, reject) => {
+    const w = new Worker(path.join(SRC, 'integrityWorker.js'), { workerData: { root: archiveDir } });
+    w.on('message', (m) => { if (m.type === 'done') { resolve(m.entries); w.terminate(); } else if (m.type === 'error') reject(new Error(m.message)); });
+    w.on('error', reject);
+  });
+  const recorded = parseRecord(serializeRecord(await measure())).entries;
+  const victim = acp.copied[0] && acp.copied[0].backup;
+  if (victim) {
+    const st = await fsp.stat(victim);
+    const buf = await fsp.readFile(victim); buf[100] ^= 0xff; await fsp.writeFile(victim, buf);
+    await fsp.utimes(victim, st.atime, st.mtime);
+  }
+  const rc = compareRecord(recorded, await measure());
+  check('11 archive: copied from the NAS, recorded, and a flipped byte is caught',
+    acp.copied.length === ar.move.newFiles.length && acp.copied.length > 0 && rc.corrupted.length === 1 && rc.ok.length === recorded.length - 1,
+    `archived=${acp.copied.length} recorded=${recorded.length} corrupted=${rc.corrupted.length} ok=${rc.ok.length}`);
 
   // Leftover quarantined test file (b1) — removed in cleanup.
   return { leftovers: [qb1 && qb1.quarantinePath].filter(Boolean), ourQuarantinePaths: [qa1, qb1].filter(Boolean).map(e => e.quarantinePath) };

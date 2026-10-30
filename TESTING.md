@@ -29,9 +29,20 @@ Write down what you changed; the tests below check that the app finds it.
 
 ## 1. Home: three jobs
 
-- [ ] Home offers **Move to backup**, **Check a backup** and **Find duplicates**, in that order.
+- [ ] Home offers five numbered stages: **Import**, **Move to backup**, **Check**, **Clean up**, **Archive**.
 - [ ] In Find duplicates, each folder row has a **Keep** switch. A kept folder shows a shield and tinted row.
 - [ ] Marking every folder Keep disables the start button and explains why.
+
+## 1a. Import from device (SD card, camera or USB drive)
+
+1. Put an SD card (or a USB stick with some photos in `DCIM`) in the PC.
+2. Home → **Import**. The card should appear under **Connected**; click it to fill in **Device**. Set **Inbox** = `D:\holdfast-test\phone`, and optionally **Your backup** = `Z:\holdfast-test\backup`. Click **See what's new**.
+
+**Expect:**
+- [ ] Only photos not already in the Inbox (or the backup) are listed as new.
+- [ ] **Import N files** copies and verifies them into `Inbox\YYYY\MM`.
+- [ ] Nothing on the card changes, and there's no "Free up" offer.
+- [ ] Running it again finds nothing new.
 
 ## 1b. Move to backup: phone copy → NAS
 
@@ -45,9 +56,9 @@ Write down what you changed; the tests below check that the app finds it.
 - [ ] Nothing in the backup was overwritten. A different file with the same name was saved as `name (2).ext`.
 - [ ] **Free up space…** asks first, then removes the local copies to the Recycle Bin and shows the Done screen.
 
-## 2. Check a backup: is everything backed up?
+## 2. Check backup: is everything backed up?
 
-1. Home → **Check a backup**. Original = `D:\holdfast-test\originals`, Copy = `Z:\holdfast-test\backup`.
+1. Home → **Check**. Original = `D:\holdfast-test\originals`, Copy = `Z:\holdfast-test\backup`.
 2. Open **Scan options**. Match confidence should default to **Thorough**, marked Recommended. Click **Compare**.
 
 **Expect:**
@@ -61,16 +72,16 @@ Write down what you changed; the tests below check that the app finds it.
 
 Note how long the scan took: ______
 
-## 3. Check a backup, Standard and Quick match
+## 3. Check backup, Standard and Quick match
 
 Repeat test 2 with **Scan options → Standard**, then with **Quick**.
 
 - [ ] Standard: the verdict notes that only the first 64 KB were compared.
 - [ ] Quick: the wording changes to name/size matches, **Only in Copy** is greyed out, and a note explains why.
 
-## 4. Find duplicates with a Keep folder
+## 4. Clean up duplicates with a Keep folder
 
-1. Home → **Find duplicates**. Add `D:\holdfast-test\originals` and mark it **Keep**. Add `Z:\holdfast-test\backup` (not Keep).
+1. Home → **Clean up**. Add `D:\holdfast-test\originals` and mark it **Keep**. Add `Z:\holdfast-test\backup` (not Keep).
 2. Click **Find duplicates**.
 
 **Expect:**
@@ -78,6 +89,16 @@ Repeat test 2 with **Scan options → Standard**, then with **Quick**.
 - [ ] Files in the Keep folder show a shield ("Keep folder") and can't be ticked.
 - [ ] The copies in the backup are pre-ticked.
 - [ ] Without any Keep folder, the newest copy in each group is kept by default; change this under Scan options.
+
+## 4b. Archive backup and re-check
+
+1. Home → **Archive**. Backup = `Z:\holdfast-test\backup`, Archive = a folder on another drive, e.g. `D:\holdfast-test\archive` or a USB disk. Click **See what to archive**.
+
+**Expect:**
+- [ ] **Archive N files** mirrors the backup's folders into the archive and verifies each copy.
+- [ ] It then writes the integrity record (`holdfast-integrity.jsonl` in the archive).
+- [ ] Back on the Archive page, **Re-check an archive** → choose the archive → **Re-check** reports "All N recorded files are intact".
+- [ ] Edit one archived photo and re-check: it shows under **Changed**. Delete one: **Missing**.
 
 ## 5. Delete from the NAS, then restore
 

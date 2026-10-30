@@ -21,6 +21,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   moveFreeUp:       ()       => ipcRenderer.invoke('move:freeUp'),
   onMoveProgress:   (cb)     => ipcRenderer.on('move:progress', (_, data) => cb(data)),
   removeMoveProgress: ()     => ipcRenderer.removeAllListeners('move:progress'),
+
+  listDevices:      ()       => ipcRenderer.invoke('fs:listDevices'),
+  archiveRecord:    ()       => ipcRenderer.invoke('archive:record'),
+  archiveVerify:    (root)   => ipcRenderer.invoke('archive:verify', root),
+  archiveCancel:    ()       => ipcRenderer.invoke('archive:cancel'),
+  onArchiveProgress: (cb)    => ipcRenderer.on('archive:progress', (_, data) => cb(data)),
+  removeArchiveProgress: ()  => ipcRenderer.removeAllListeners('archive:progress'),
   onDeleteProgress: (cb)     => ipcRenderer.on('files:deleteProgress', (_, data) => cb(data)),
   removeDeleteProgress: ()   => ipcRenderer.removeAllListeners('files:deleteProgress'),
   getQuarantineManifest: ()  => ipcRenderer.invoke('files:getQuarantineManifest'),

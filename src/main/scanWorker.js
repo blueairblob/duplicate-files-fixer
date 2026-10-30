@@ -526,7 +526,7 @@ async function run() {
 
   // ── Move to backup: what to copy, what's already there ───────────────────
   let move = null;
-  if (job === 'move' && mode === 'compare') {
+  if ((job === 'move' || job === 'import' || job === 'archive') && mode === 'compare') {
     const slim = f => ({ path: f.path, name: f.name, size: f.size, modified: f.modified, id: f.id, root: f.root, ext: f.ext });
     const plan = buildMovePlan(nonEmptyFiles, fileMap, unreadable);
     move = {

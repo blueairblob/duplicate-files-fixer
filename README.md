@@ -7,14 +7,22 @@ A working Electron + React prototype covering the core features from the PRD (se
 
 - Folder selection (browse, location picker, or drag-and-drop)
 - File type and size filters — with no type picked, **every** file is scanned (RAW photos, TIFFs, anything)
-- **Three jobs, in the order a backup happens:**
+- **Five stages, in the order your data travels:** Import → Move to backup → Check backup → Clean up duplicates → Archive.
+  - **Import from device**: an SD card, camera or USB drive into a local **Inbox**.
+    - Copies only what isn't already in the Inbox, or in your backup if you add it.
+    - Every copy is verified, and nothing on the device is ever changed.
+    - Connected removable drives, and their DCIM photo folders, are offered on the Import page.
+    - Phones aren't supported yet. Run `tools/probe-phone.ps1` with a phone connected to test whether Windows exposes its photos.
   - **Move to backup**: you've copied an iPhone/Android (or SD card, camera, Downloads) to a local folder and want it on the NAS.
     - Holdfast compares the local copy against your **whole** backup by content, and copies only what isn't there (re-imports like `IMG_1234 (1).HEIC` are skipped).
     - Files go into `Year/Month` folders, or keep their original folders.
     - Each copy is written to a temporary name, compared byte for byte, then renamed into place with its original date. Nothing is ever overwritten.
     - Then, if you choose, it frees up the local copies that are verified safe in the backup. They go to the Recycle Bin.
-  - **Find duplicates**: search one or more folders. Mark any folder **Keep** and it's compared against but never touched; its copies elsewhere are selected for removal. This is the "reference folder" idea from dupeGuru, Duplicate Cleaner and Czkawka.
-  - **Check a backup**: an **Original** against a **Copy**, such as a backup. You get a verdict ("✓ Everything in the Original is also in the Copy", or "⚠ 12 files are missing") and three lists: *Only in Original* (missing from the Copy), *In both*, and *Only in Copy*. Copies in "In both" can be reviewed and removed from the Copy side. Defaults to a Thorough (byte-for-byte) scan.
+  - **Clean up duplicates**: search one or more folders. Mark any folder **Keep** and it's compared against but never touched; its copies elsewhere are selected for removal. This is the "reference folder" idea from dupeGuru, Duplicate Cleaner and Czkawka.
+  - **Check backup**: an **Original** against a **Copy**, such as a backup. You get a verdict ("✓ Everything in the Original is also in the Copy", or "⚠ 12 files are missing") and three lists: *Only in Original* (missing from the Copy), *In both*, and *Only in Copy*. Copies in "In both" can be reviewed and removed from the Copy side. Defaults to a Thorough (byte-for-byte) scan.
+  - **Archive backup**: a verified, mirrored second copy of your backup on a long-term drive, such as an offline disk (the 3-2-1 rule).
+    - Holdfast then writes `holdfast-integrity.jsonl`, a SHA-256 fingerprint of every file in the archive.
+    - **Re-check an archive** re-reads every byte and reports files that are **damaged** (same size and date, different bytes: bit rot or tampering), **missing**, **changed** or **new**.
 - **Compare screen**: the colour bar and boxes pick the list. Each list sits in its own scrolling panel with sortable columns, a pinned footer, and a Files / By folder switch.
 - **Folder-level decisions** — folders that are fully duplicated collapse into a single row you can select in one click; folders that are only *partly* duplicated are surfaced first, because that's where judgement is actually needed. Selecting a partial folder marks only its duplicated files, never the ones that exist nowhere else.
 - **Match confidence** — choose how hard the scan works:

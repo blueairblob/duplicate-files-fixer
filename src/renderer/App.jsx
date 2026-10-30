@@ -7,12 +7,13 @@ import ScanView from './views/ScanView.jsx';
 import ResultsView from './views/ResultsView.jsx';
 import CompareView from './views/CompareView.jsx';
 import MoveView from './views/MoveView.jsx';
+import IntegrityView from './views/IntegrityView.jsx';
 import DoneView from './views/DoneView.jsx';
 import RecoveryView from './views/RecoveryView.jsx';
 import HistoryView from './views/HistoryView.jsx';
 import SettingsView from './views/SettingsView.jsx';
 import { initTheme } from './utils/theme.js';
-import { loadHistory, addHistoryEntry, updateHistoryEntry, removeHistoryEntry, clearHistory, entryTitle, entrySubtitle, jobOf } from './utils/scanHistory.js';
+import { loadHistory, addHistoryEntry, updateHistoryEntry, removeHistoryEntry, clearHistory, entryTitle, entrySubtitle, jobOf, JOB_LABELS } from './utils/scanHistory.js';
 
 const api = window.electronAPI;
 
@@ -32,7 +33,8 @@ export default function App() {
   const [view, setView] = useState('home');           // what is displayed
   const [showAllFiles, setShowAllFiles] = useState(false); // Compare summary -> full file list
   const [fileSelection, setFileSelection] = useState(null); // paths chosen by folder on Compare
-  const [compareUi, setCompareUi] = useState(null);         // Compare tab/sort/selection, kept across Results trips
+  const [compareUi, setCompareUi] = useState(null);
+  const [integrityRoot, setIntegrityRoot] = useState(null); // archive being re-checked         // Compare tab/sort/selection, kept across Results trips
   const [selectionLabel, setSelectionLabel] = useState(null); // what the drill-down is scoped to
   const [section, setSection] = useState('scan');     // which sidebar page when view === 'home'
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -213,13 +215,13 @@ export default function App() {
   // Compare folders shows the two-sided summary first; Find duplicates (and a
   // failed scan) goes straight to the duplicate groups.
   const isCompareJob = !!scan && jobOf(scan.config || {}) === 'compare';
-  const showMove = !!scan && jobOf(scan.config || {}) === 'move' && !!scan.result && !!scan.result.move && !scan.result.error;
+  const showMove = !!scan && ['move', 'import', 'archive'].includes(jobOf(scan.config || {})) && !!scan.result && !!scan.result.move && !scan.result.error;
   const showCompare = !showMove && isCompareJob && !!scan.result && !!scan.result.census && !scan.result.error && !showAllFiles;
   const inScanFlow = view !== 'home';
   const title = inScanFlow
     ? (view === 'results'
-        ? (showMove ? 'Move to backup' : showCompare ? 'Check a backup' : 'Duplicate files')
-        : { scanning: 'Scanning\u2026', done: 'Done' }[view])
+        ? (showMove ? JOB_LABELS[jobOf(scan.config)] : showCompare ? JOB_LABELS.compare : 'Duplicate files')
+        : { scanning: 'Scanning\u2026', done: 'Done', integrity: 'Re-check archive' }[view])
     : SECTION_TITLES[section];
 
   const scanActivity = scan ? (
@@ -254,7 +256,8 @@ export default function App() {
 
         <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
           {view === 'home' && section === 'scan' && (
-            <HomeView onStartScan={handleStartScan} preset={preset} />
+            <HomeView onStartScan={handleStartScan} preset={preset}
+              onVerifyArchive={(root) => { setIntegrityRoot(root); setView('integrity'); }} />
           )}
           {view === 'home' && section === 'quarantine' && (
             <RecoveryView onBack={() => { setSection('scan'); refreshQuarantineCount(); }} />
@@ -287,6 +290,9 @@ export default function App() {
             <CompareView scanResult={scan.result} scanConfig={scan.config}
               ui={compareUi} onUi={setCompareUi}
               onReviewFiles={(paths, label) => { setFileSelection(paths || null); setSelectionLabel(label || null); setShowAllFiles(true); }} onBack={handleReset} />
+          )}
+          {view === 'integrity' && integrityRoot && (
+            <IntegrityView root={integrityRoot} onBack={() => { setIntegrityRoot(null); setView('home'); setSection('scan'); }} />
           )}
           {view === 'results' && showMove && (
             <MoveView scanResult={scan.result} scanConfig={scan.config} onDone={handleDeleteComplete} onBack={handleReset} />

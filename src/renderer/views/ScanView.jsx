@@ -19,6 +19,7 @@ export default function ScanView({ scanConfig, progress, startedAt, cancelling, 
   const { mode, job, protectedFolders = [], targetFolders = [], filters = {}, autoMarkRule, includeEmpty } = scanConfig || {};
   const isCompareJob = job ? job === 'compare' : mode === 'compare';
   const isMoveJob = job === 'move';
+  const sideLabels = { import: ['Inbox / backup', 'Device'], archive: ['Archive', 'Backup'] }[job];
 
   const { scanned = 0, phase = 'walking', total = 0, currentPath = '' } = progress || {};
 
@@ -172,10 +173,10 @@ export default function ScanView({ scanConfig, progress, startedAt, cancelling, 
           width: '100%', display: 'flex', flexDirection: 'column', gap: scale(10),
         }}>
           {mode === 'compare' && protectedFolders.length > 0 && (
-            <FolderGroup label={isMoveJob ? 'Backup' : isCompareJob ? 'Original' : 'Keep'} Icon={ShieldIcon} color="var(--accent)" folders={protectedFolders} scale={scale} />
+            <FolderGroup label={sideLabels ? sideLabels[0] : isMoveJob ? 'Backup' : isCompareJob ? 'Original' : 'Keep'} Icon={ShieldIcon} color="var(--accent)" folders={protectedFolders} scale={scale} />
           )}
           <FolderGroup
-            label={isMoveJob ? 'From' : isCompareJob ? 'Copy' : 'Searching'}
+            label={sideLabels ? sideLabels[1] : isMoveJob ? 'From' : isCompareJob ? 'Copy' : 'Searching'}
             Icon={isCompareJob ? TargetIcon : SearchIcon}
             color="var(--accent)"
             folders={targetFolders} scale={scale}

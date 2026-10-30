@@ -66,9 +66,9 @@ export function clearHistory() {
 // ── Display helpers ──────────────────────────────────────────────────────────
 // The app has two jobs. Older entries only have a scan mode: 'simple' was
 // Find duplicates; 'compare' and 'verify' are now Compare folders.
-export const JOB_LABELS = { move: 'Move to backup', find: 'Find duplicates', compare: 'Check a backup' };
+export const JOB_LABELS = { import: 'Import from device', move: 'Move to backup', compare: 'Check backup', find: 'Clean up duplicates', archive: 'Archive backup' };
 export function jobOf(e) {
-  if (e && (e.job === 'move' || e.job === 'find' || e.job === 'compare')) return e.job;
+  if (e && JOB_LABELS[e.job]) return e.job;
   return e && e.mode === 'simple' ? 'find' : 'compare';
 }
 
@@ -81,7 +81,7 @@ export function entryTitle(e) {
   const src = e.protectedFolders[0] ? leaf(e.protectedFolders[0]) : null;
   const tgt = e.targetFolders[0] ? leaf(e.targetFolders[0]) : null;
   if (jobOf(e) === 'find') return tgt || src || JOB_LABELS.find;
-  if (jobOf(e) === 'move') return src && tgt ? `${tgt} → ${src}` : JOB_LABELS.move;
+  if (['move', 'import', 'archive'].includes(jobOf(e))) return src && tgt ? `${tgt} → ${src}` : JOB_LABELS[jobOf(e)];
   if (src && tgt) return `${src} vs ${tgt}`;
   return JOB_LABELS.compare;
 }

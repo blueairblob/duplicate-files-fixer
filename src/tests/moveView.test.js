@@ -17,6 +17,8 @@ beforeAll(async () => {
     moveFreeUpSummary: async () => ({ files: copied ? 2 : 1, bytes: copied ? 300 : 100 }),
     moveFreeUp: async () => { calls.push(['freeUp']); return { trashed: ['a', 'b'], quarantined: [], skipped: [], failed: [], freedBytes: 300 }; },
     moveCancel: async () => {},
+    archiveRecord: async () => { calls.push(['record']); return { files: 7, bytes: 700, path: 'D:\\Offline\\holdfast-integrity.jsonl' }; },
+    archiveCancel: async () => {}, onArchiveProgress: () => {}, removeArchiveProgress: () => {},
     onMoveProgress: () => {}, removeMoveProgress: () => {},
   };
   ({ default: MoveView } = await import('../renderer/views/MoveView.jsx'));
@@ -33,12 +35,12 @@ const result = {
 };
 const config = { job: 'move', protectedFolders: ['Z:\\Photos'], targetFolders: ['C:\\Phone'] };
 
-async function render(onDone = () => {}) {
+async function render(onDone = () => {}, cfg = config) {
   const el = document.createElement('div');
   document.body.innerHTML = '';
   document.body.appendChild(el);
   await act(async () => {
-    createRoot(el).render(React.createElement(DPRProvider, null, React.createElement(MoveView, { scanResult: result, scanConfig: config, onDone, onBack() {} })));
+    createRoot(el).render(React.createElement(DPRProvider, null, React.createElement(MoveView, { scanResult: result, scanConfig: cfg, onDone, onBack() {} })));
   });
   return el;
 }
@@ -61,7 +63,7 @@ describe('MoveView', () => {
     calls.length = 0;
     let done = null;
     const el = await render((r) => { done = r; });
-    await click(button(el, /^Copy 1 file to backup/));
+    await click(button(el, /^Copy 1 file/));
     expect(calls[0]).toEqual(['copy', { layout: 'date' }]);
     expect(el.textContent).toMatch(/1 copied and verified/);
     expect(el.textContent).toMatch(/Free up 300\.0 B on this computer/);
@@ -74,5 +76,25 @@ describe('MoveView', () => {
     await click(button(el, /^Remove local copies$/));
     expect(calls.at(-1)).toEqual(['freeUp']);
     expect(done).toMatchObject({ trashed: ['a', 'b'], totalScanned: 3 });
+  });
+
+  it('Import never offers to free up the device', async () => {
+    calls.length = 0;
+    const el = await render(() => {}, { job: 'import', protectedFolders: ['C:\\Inbox'], targetFolders: ['E:\\DCIM'] });
+    expect(el.textContent).toMatch(/Nothing on the device is changed/);
+    await click(button(el, /^Import 1 file/));
+    expect(calls[0]).toEqual(['copy', { layout: 'date' }]);
+    expect(el.textContent).not.toMatch(/Free up/);
+  });
+
+  it('Archive mirrors folders, then writes the integrity record', async () => {
+    calls.length = 0;
+    const el = await render(() => {}, { job: 'archive', protectedFolders: ['D:\\Offline'], targetFolders: ['Z:\\Photos'] });
+    expect(button(el, /^Year \/ Month$/)).toBeUndefined();       // no layout choice: mirror
+    await click(button(el, /^Archive 1 file/));
+    expect(calls.map(c => c[0])).toEqual(['copy', 'record']);
+    expect(calls[0][1]).toEqual({ layout: 'folders' });
+    expect(el.textContent).toMatch(/Integrity record written: 7 files/);
+    expect(el.textContent).not.toMatch(/Free up/);
   });
 });

@@ -18,18 +18,24 @@ const RULE_LABELS = {
 };
 const CONFIDENCE_LABELS = { quick: 'quick match', standard: 'standard match', thorough: 'thorough match' };
 
-// Three jobs, in the order a backup happens:
-//   move    — a local copy of a phone/device → the backup: copy only what the
-//             backup doesn't already have (anywhere), verify every copy, then
-//             optionally free up the local copies
-//   compare — "Check a backup": an Original against a Copy — what's missing,
+// Five stages, in the order data travels (device → local → NAS → archive):
+//   import  — a device (SD card, camera, USB) → a local Inbox: copy only what
+//             the Inbox/backup don't already have; the device is never changed
+//   move    — the local copy → the backup: copy only what the backup doesn't
+//             already have (anywhere), verify every copy, then optionally free
+//             up the local copies
+//   compare — "Check backup": an Original against a Copy — what's missing,
 //             what's in both, what's only in the copy
-//   find    — duplicates within any set of folders; folders marked Keep are
-//             compared against but never touched
+//   find    — "Clean up duplicates" within any set of folders; folders marked
+//             Keep are compared against but never touched
+//   archive — the backup → a long-term drive (mirrored, verified), plus an
+//             integrity record that can be re-checked later
 const JOBS = [
-  { id: 'move',    label: 'Move to backup',  hint: 'Copy what’s new from a phone or device copy into your backup, then free up the space' },
-  { id: 'compare', label: 'Check a backup',  hint: 'Check an original against a copy or backup: what’s missing, matched, or extra' },
-  { id: 'find',    label: 'Find duplicates', hint: 'Find and remove duplicate files in one or more folders' },
+  { id: 'import',  short: 'Import',         label: 'Import from device',  hint: 'Copy new photos and files from an SD card, camera or USB drive into a local Inbox' },
+  { id: 'move',    short: 'Move to backup', label: 'Move to backup',      hint: 'Copy what’s new from a local copy into your backup, then free up the space' },
+  { id: 'compare', short: 'Check',          label: 'Check backup',        hint: 'Check an original against a copy or backup: what’s missing, matched, or extra' },
+  { id: 'find',    short: 'Clean up',       label: 'Clean up duplicates', hint: 'Find and remove duplicate files in one or more folders' },
+  { id: 'archive', short: 'Archive',        label: 'Archive backup',      hint: 'Make a verified long-term copy of your backup, with a record to re-check it for damage later' },
 ];
 
 // ── Folder zone ──────────────────────────────────────────────────────────────
@@ -157,6 +163,16 @@ function FolderZone({ label, sublabel, Icon, iconColor, folders, onAddPath, onRe
 
 // Why a scan can't start, in the words of the job (see roots.js codes).
 function rootProblemText(job, b) {
+  if (job === 'import') {
+    return b.code === 'same'
+      ? `The device and the Inbox are the same folder (${b.protected}).`
+      : `The device folder “${b.target}” is inside “${b.protected}”. Pick the device itself.`;
+  }
+  if (job === 'archive') {
+    return b.code === 'same'
+      ? `The backup and the archive are the same folder (${b.protected}).`
+      : `The backup “${b.target}” is inside the archive folder “${b.protected}”. Pick an archive folder outside the backup.`;
+  }
   if (job === 'move') {
     return b.code === 'same'
       ? `“From” and “To” are the same folder (${b.protected}).`
@@ -173,7 +189,7 @@ function rootProblemText(job, b) {
 }
 
 // ── Main view ────────────────────────────────────────────────────────────────
-export default function HomeView({ onStartScan, preset = null }) {
+export default function HomeView({ onStartScan, onVerifyArchive, preset = null }) {
   const { scale } = useDPR();
   // Shown in the options summary; re-read each time Home is shown.
   const [exclusionCount, setExclusionCount] = useState(0);
@@ -181,9 +197,20 @@ export default function HomeView({ onStartScan, preset = null }) {
     api?.getExclusions?.().then(list => setExclusionCount(Array.isArray(list) ? list.length : 0)).catch(() => {});
   }, []);
 
-  const [job, setJob] = useState('move');
+  const [job, setJob] = useState('import');
   const [moveFrom, setMoveFrom] = useState([]);
   const [moveTo, setMoveTo] = useState([]);   // exactly one backup folder
+  const [importFrom, setImportFrom] = useState([]);     // the device (one)
+  const [inbox, setInbox] = useState([]);               // local Inbox (one)
+  const [importBackup, setImportBackup] = useState([]); // optional: also skip what's already backed up
+  const [archiveFrom, setArchiveFrom] = useState([]);   // the backup
+  const [archiveTo, setArchiveTo] = useState([]);       // the archive drive/folder (one)
+  const [verifyRoot, setVerifyRoot] = useState([]);     // an archive to re-check
+  const [devices, setDevices] = useState([]);
+  useEffect(() => {
+    if (job !== 'import' || !api?.listDevices) return;
+    api.listDevices().then(d => setDevices(Array.isArray(d) ? d : [])).catch(() => setDevices([]));
+  }, [job]);
   const [findFolders, setFindFolders] = useState([]);
   const [keep, setKeep] = useState(() => new Set());
   const [originalFolders, setOriginalFolders] = useState([]);
@@ -204,8 +231,8 @@ export default function HomeView({ onStartScan, preset = null }) {
   const [compareConfidence, setCompareConfidence] = useState(savedOptions.compareConfidence || savedOptions.verifyConfidence || 'thorough');
   // Move to backup always reads every byte: it skips and later removes files
   // only when they're proven identical to the backup copy.
-  const confidence = job === 'move' ? 'thorough' : job === 'compare' ? compareConfidence : findConfidence;
-  const setConfidence = job === 'move' ? () => {} : job === 'compare' ? setCompareConfidence : setFindConfidence;
+  const confidence = job === 'move' || job === 'import' || job === 'archive' ? 'thorough' : job === 'compare' ? compareConfidence : findConfidence;
+  const setConfidence = job === 'move' || job === 'import' || job === 'archive' ? () => {} : job === 'compare' ? setCompareConfidence : setFindConfidence;
 
   useEffect(() => {
     try {
@@ -221,7 +248,14 @@ export default function HomeView({ onStartScan, preset = null }) {
     const j = jobOf(preset);
     setJob(j);
     if (preset.confidence) (j === 'compare' ? setCompareConfidence : setFindConfidence)(preset.confidence);
-    if (j === 'move') {
+    if (j === 'import') {
+      setInbox((preset.protectedFolders || []).slice(0, 1));
+      setImportBackup((preset.protectedFolders || []).slice(1, 2));
+      setImportFrom((preset.targetFolders || []).slice(0, 1));
+    } else if (j === 'archive') {
+      setArchiveTo((preset.protectedFolders || []).slice(0, 1));
+      setArchiveFrom(preset.targetFolders || []);
+    } else if (j === 'move') {
       setMoveTo((preset.protectedFolders || []).slice(0, 1));
       setMoveFrom(preset.targetFolders || []);
     } else if (j === 'find') {
@@ -247,20 +281,26 @@ export default function HomeView({ onStartScan, preset = null }) {
 
   const keptFolders = findFolders.filter(f => keep.has(f));
   const cleanFolders = findFolders.filter(f => !keep.has(f));
-  const canScan = job === 'move' ? moveFrom.length > 0 && moveTo.length === 1
+  const canScan = job === 'import' ? importFrom.length === 1 && inbox.length === 1
+    : job === 'archive' ? archiveFrom.length > 0 && archiveTo.length === 1
+    : job === 'move' ? moveFrom.length > 0 && moveTo.length === 1
     : job === 'find' ? cleanFolders.length > 0
     : originalFolders.length > 0 && copyFolders.length > 0;
 
   // Overlapping or aliased folders are checked before the scan starts (and
   // again in the main process). See src/main/roots.js for the rules.
   const [rootProblem, setRootProblem] = useState(null);
-  useEffect(() => { setRootProblem(null); }, [job, findFolders, keep, originalFolders, copyFolders, moveFrom, moveTo]);
+  useEffect(() => { setRootProblem(null); }, [job, findFolders, keep, originalFolders, copyFolders, moveFrom, moveTo, importFrom, inbox, importBackup, archiveFrom, archiveTo]);
 
   // Engine mapping: Find with Keep folders is a protected-vs-target scan;
   // without them it's a plain duplicate scan. Compare is always two-sided.
   const buildConfig = () => {
     const base = { job, filters: { types, minSize }, autoMarkRule, includeEmpty, confidence };
     if (job === 'move') return { ...base, mode: 'compare', protectedFolders: moveTo, targetFolders: moveFrom, confidence: 'thorough' };
+    // Import copies into the Inbox (first protected folder); the backup, if
+    // given, only adds "already have it" matches.
+    if (job === 'import') return { ...base, mode: 'compare', protectedFolders: [...inbox, ...importBackup], targetFolders: importFrom, confidence: 'thorough' };
+    if (job === 'archive') return { ...base, mode: 'compare', protectedFolders: archiveTo, targetFolders: archiveFrom, confidence: 'thorough' };
     if (job === 'compare') return { ...base, mode: 'compare', protectedFolders: originalFolders, targetFolders: copyFolders };
     return keptFolders.length > 0
       ? { ...base, mode: 'compare', protectedFolders: keptFolders, targetFolders: cleanFolders }
@@ -305,24 +345,107 @@ export default function HomeView({ onStartScan, preset = null }) {
           display: 'inline-flex', background: 'var(--bg-inset)',
           borderRadius: 'var(--radius-sm)', padding: scale(3), marginBottom: scale(24),
         }}>
-          {JOBS.map(({ id, label, hint }) => {
+          {JOBS.map(({ id, short, label, hint }, i) => {
             const active = job === id;
             return (
-              <button key={id} onClick={() => setJob(id)} aria-pressed={active} title={hint} style={{
-                padding: `${scale(6)}px ${scale(16)}px`,
+              <button key={id} onClick={() => setJob(id)} aria-pressed={active} aria-label={label} title={hint} style={{
+                padding: `${scale(6)}px ${scale(12)}px`,
                 fontSize: 'var(--fs-secondary)', fontWeight: active ? 500 : 400,
                 background: active ? 'var(--bg-card)' : 'transparent',
                 border: `1px solid ${active ? 'var(--border)' : 'transparent'}`,
                 borderRadius: scale(6),
                 color: active ? 'var(--text-primary)' : 'var(--text-secondary)',
                 boxShadow: active ? 'var(--shadow-card)' : 'none',
-              }}>{label}</button>
+                whiteSpace: 'nowrap',
+              }}><span aria-hidden style={{ color: 'var(--text-muted)', marginRight: scale(5) }}>{i + 1}</span>{short}</button>
             );
           })}
         </div>
 
         {/* Folder zones — the hero of the screen */}
-        {job === 'move' ? (
+        {job === 'import' ? (
+          <div style={{ marginBottom: scale(20) }}>
+            {devices.length > 0 && (
+              <div style={{ display: 'flex', gap: scale(8), flexWrap: 'wrap', alignItems: 'center', marginBottom: scale(12), fontSize: 'var(--fs-caption)', color: 'var(--text-secondary)' }}>
+                Connected:
+                {devices.map(d => (
+                  <button key={d.path} onClick={() => setImportFrom([d.dcim || d.path])} style={{
+                    padding: `${scale(4)}px ${scale(10)}px`, borderRadius: scale(12), border: '1px solid var(--border-strong)',
+                    background: 'var(--bg-card)', color: 'var(--text-primary)', fontSize: 'var(--fs-caption)',
+                  }}>{d.label}{d.dcim ? ' · photos' : ''}</button>
+                ))}
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: scale(16) }}>
+              <FolderZone
+                label="Device"
+                sublabel="An SD card, camera or USB drive (pick its DCIM folder for photos). Nothing on the device is ever changed. Phones: coming next — for now, use the phone's own import into the Inbox."
+                Icon={FolderIcon} iconColor="var(--text-secondary)"
+                folders={importFrom}
+                onAddPath={p => setImportFrom([p])}
+                onRemove={() => setImportFrom([])}
+              />
+              <FolderZone
+                label="Inbox"
+                sublabel="A local folder where imports land, before Move to backup sends them on."
+                Icon={FolderIcon} iconColor="var(--accent)"
+                folders={inbox}
+                onAddPath={p => setInbox([p])}
+                onRemove={() => setInbox([])}
+              />
+            </div>
+            <div style={{ marginTop: scale(12) }}>
+              <FolderZone
+                label="Your backup (optional)"
+                sublabel="Also skip anything that's already in your backup, even if it has left the Inbox."
+                Icon={ShieldIcon} iconColor="var(--accent)"
+                folders={importBackup}
+                onAddPath={p => setImportBackup([p])}
+                onRemove={() => setImportBackup([])}
+              />
+            </div>
+          </div>
+        ) : job === 'archive' ? (
+          <div style={{ marginBottom: scale(20) }}>
+            <div style={{ display: 'flex', gap: scale(16) }}>
+              <FolderZone
+                label="Backup"
+                sublabel="What to archive, e.g. your NAS photo folder. Never changed."
+                Icon={ShieldIcon} iconColor="var(--accent)"
+                folders={archiveFrom}
+                onAddPath={p => addPathTo(setArchiveFrom, p)}
+                onRemove={f => setArchiveFrom(prev => prev.filter(x => x !== f))}
+              />
+              <FolderZone
+                label="Archive"
+                sublabel="A long-term drive or folder, e.g. an external disk you keep offline. Gets a mirrored, verified copy plus an integrity record."
+                Icon={TargetIcon} iconColor="var(--text-secondary)"
+                folders={archiveTo}
+                onAddPath={p => setArchiveTo([p])}
+                onRemove={() => setArchiveTo([])}
+              />
+            </div>
+            <div style={{
+              marginTop: scale(12), padding: `${scale(12)}px ${scale(14)}px`, borderRadius: 'var(--radius-md)',
+              border: '1px solid var(--border)', background: 'var(--bg-card)', display: 'flex', alignItems: 'center', gap: scale(12), flexWrap: 'wrap',
+            }}>
+              <div style={{ flex: 1, minWidth: scale(220) }}>
+                <div style={{ fontSize: 'var(--fs-secondary)', fontWeight: 500 }}>Re-check an archive</div>
+                <div style={{ fontSize: 'var(--fs-caption)', color: 'var(--text-secondary)' }}>
+                  {verifyRoot[0] ? verifyRoot[0] : 'Re-read every file and compare it with its integrity record — catches silent damage, edits and losses.'}
+                </div>
+              </div>
+              <button onClick={async () => { const p = api ? await api.openFolder() : []; if (p && p[0]) setVerifyRoot([p[0]]); }}
+                style={{ padding: `${scale(6)}px ${scale(12)}px`, borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-strong)', background: 'transparent', color: 'var(--text-primary)', fontSize: 'var(--fs-secondary)' }}>
+                Choose archive…
+              </button>
+              <button disabled={!verifyRoot[0]} onClick={() => onVerifyArchive && onVerifyArchive(verifyRoot[0])}
+                style={{ padding: `${scale(6)}px ${scale(12)}px`, borderRadius: 'var(--radius-sm)', background: 'var(--accent)', color: 'var(--on-accent)', fontSize: 'var(--fs-secondary)', opacity: verifyRoot[0] ? 1 : 0.45 }}>
+                Re-check
+              </button>
+            </div>
+          </div>
+        ) : job === 'move' ? (
           <div style={{ display: 'flex', gap: scale(16), marginBottom: scale(20) }}>
             <FolderZone
               label="From"
@@ -405,7 +528,7 @@ export default function HomeView({ onStartScan, preset = null }) {
             fontSize: 'var(--fs-body)', padding: `${scale(9)}px ${scale(24)}px`,
             opacity: canScan ? 1 : 0.45, cursor: canScan ? 'pointer' : 'not-allowed',
           }}>
-            {job === 'find' ? 'Find duplicates' : job === 'move' ? 'See what’s new' : 'Compare'}
+            {{ import: 'See what’s new', move: 'See what’s new', compare: 'Compare', find: 'Find duplicates', archive: 'See what to archive' }[job]}
           </button>
           <span style={{
             display: 'inline-flex', alignItems: 'center', gap: scale(5),
@@ -423,7 +546,11 @@ export default function HomeView({ onStartScan, preset = null }) {
         )}
         {!canScan && (
           <p style={{ marginTop: scale(8), fontSize: 'var(--fs-caption)', color: 'var(--text-muted)' }}>
-            {job === 'move'
+            {job === 'import'
+              ? 'Pick the device and your Inbox folder.'
+              : job === 'archive'
+              ? 'Pick the backup and an archive folder.'
+              : job === 'move'
               ? 'Add the local copy (From) and your backup folder (To).'
               : job === 'compare'
               ? 'Add an Original and a Copy to compare.'

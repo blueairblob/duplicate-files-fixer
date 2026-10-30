@@ -24,7 +24,8 @@ const { checkRoots } = require('./system');
 const { createDeleteService, hashFull } = require('./deleteService');
 const { executeCopy } = require('./copyFiles');
 const { normaliseRoot, isInside } = require('./roots');
-const { getLocations } = require('./locations');
+const { getLocations, getRemovableDevices } = require('./locations');
+const { RECORD_NAME, serializeRecord, parseRecord, compareRecord } = require('./integrity');
 const { makeAppUrlCheck, hardenWebContents, denyAllPermissions } = require('./security');
 const { migrateUserData } = require('./migrate');
 
@@ -33,7 +34,9 @@ const DEV_URL = 'http://localhost:5173';
 const INDEX_PATH = path.join(__dirname, '../../dist/index.html');
 // Worker threads can't load from inside app.asar; package.json unpacks
 // src/main (the worker and the modules it requires) next to it.
-const WORKER_PATH = path.join(__dirname, 'scanWorker.js').replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`);
+const unpacked = (p) => p.replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`);
+const WORKER_PATH = unpacked(path.join(__dirname, 'scanWorker.js'));
+const INTEGRITY_WORKER_PATH = unpacked(path.join(__dirname, 'integrityWorker.js'));
 // HOLDFAST_SMOKE=1: load the built page in a hidden window, run one real scan,
 // print the result and exit (used by `npm run smoke` and CI).
 const SMOKE = process.env.HOLDFAST_SMOKE === '1';
@@ -179,6 +182,7 @@ async function runSmoke() {
     tgtCopy: path.join(dir, 'tgt', 'a copy.jpg'),
     phone: path.join(dir, 'phone'),
     backup: path.join(dir, 'backup'),
+    archive: path.join(dir, 'archive'),
   };
   try {
     fs.mkdirSync(P.src); fs.mkdirSync(P.tgt);
@@ -189,6 +193,7 @@ async function runSmoke() {
     fs.writeFileSync(path.join(P.phone, 'new.jpg'), 'only on the phone');
     fs.writeFileSync(path.join(P.phone, 'dup.jpg'), 'already backed up');
     fs.writeFileSync(path.join(P.backup, 'old.jpg'), 'already backed up');
+    fs.mkdirSync(P.archive);
 
     report.ipc = await win.webContents.executeJavaScript(`(async () => {
       const P = ${JSON.stringify(P)};
@@ -222,6 +227,24 @@ async function runSmoke() {
     })()`).catch(e => ({ error: e.message }));
     report.ipc.filesBack = fs.existsSync(P.srcA) && fs.existsSync(P.tgtCopy);
     report.ipc.moveLanded = fs.existsSync(path.join(P.backup, 'phone', 'new.jpg')) && !fs.existsSync(path.join(P.phone, 'new.jpg'));
+
+    // Archive: mirror the backup into the archive and write its integrity
+    // record; then flip one byte (keeping size and date) and re-check.
+    report.ipc.archive = await win.webContents.executeJavaScript(`(async () => {
+      const P = ${JSON.stringify(P)};
+      const api = window.electronAPI;
+      await api.startScan({ job: 'archive', mode: 'compare', protectedFolders: [P.archive], targetFolders: [P.backup], filters: {}, confidence: 'thorough' });
+      const cp = await api.moveCopy({ layout: 'folders' });
+      const rec = await api.archiveRecord();
+      return { copied: cp.copied.length, recorded: rec.files };
+    })()`).catch(e => ({ error: e.message }));
+    const victim = path.join(P.archive, 'backup', 'old.jpg');
+    if (fs.existsSync(victim)) {
+      const st = fs.statSync(victim);
+      const buf = fs.readFileSync(victim); buf[0] ^= 0xff; fs.writeFileSync(victim, buf);
+      fs.utimesSync(victim, st.atime, st.mtime);
+    }
+    report.ipc.archiveCheck = await win.webContents.executeJavaScript(`window.electronAPI.archiveVerify(${JSON.stringify(P.archive)}).then(r => r.counts)`).catch(e => ({ error: e.message }));
     report.scan = { groups: report.ipc.groups };
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -230,7 +253,9 @@ async function runSmoke() {
   const ipc = report.ipc || {};
   const ipcOk = ipc.overlapBlocked && ipc.groups === 1 && ipc.census && ipc.protectedRefused
     && ipc.quarantined && ipc.listed && ipc.restored && ipc.exclusions && ipc.filesBack
-    && ipc.movePlan && ipc.moveCopied && ipc.moveFreed && ipc.moveLanded;
+    && ipc.movePlan && ipc.moveCopied && ipc.moveFreed && ipc.moveLanded
+    && ipc.archive && ipc.archive.copied === 2 && ipc.archive.recorded === 2
+    && ipc.archiveCheck && ipc.archiveCheck.corrupted === 1;
   const ok = !!(report.page && report.page.rendered && report.page.bridge && report.page.nodeHidden
     && (isDev || report.page.csp) && ipcOk && report.errors.length === 0);
   console.log('[smoke] ' + JSON.stringify(report));
@@ -265,6 +290,7 @@ handle('dialog:saveTextFile', async (_event, defaultName, content) => {
 
 // ── IPC: Drive / network locations (async — see locations.js) ─────────────────
 handle('fs:getLocations', async () => getLocations());
+handle('fs:listDevices', async () => getRemovableDevices());
 
 // ── IPC: Exclusion list (in-memory; persisted properly in Sprint 4) ──────────
 // Exclusions persist in userData/holdfast-exclusions.json (written atomically).
@@ -353,8 +379,12 @@ handle('scan:start', async (event, opts) => {
       } else if (msg.type === 'done') {
         activeWorker = null;
         lastSession = buildSession(msg.result, opts, process.platform);
-        lastMove = opts.job === 'move' && msg.result.move
-          ? { toRoot: (opts.protectedFolders || [])[0], fromRoots: opts.targetFolders || [], plan: msg.result.move, copied: [], cleared: new Set() }
+        // Transfer jobs: copy what's new from targetFolders into the first
+        // protected folder. Only Move to backup may free up the source:
+        // Import never changes the device, Archive never changes the backup.
+        lastMove = ['move', 'import', 'archive'].includes(opts.job) && msg.result.move
+          ? { job: opts.job, toRoot: (opts.protectedFolders || [])[0], fromRoots: opts.targetFolders || [], plan: msg.result.move,
+              copied: [], cleared: new Set(), allowFreeUp: opts.job === 'move' }
           : null;
         resolve(msg.result);
       } else if (msg.type === 'cancelled') {
@@ -444,7 +474,7 @@ handle('move:copy', async (event, { layout } = {}) => {
 // plus the ones the scan found already there. Each must sit under a From
 // folder and not inside the backup; executeDeletion re-hashes both copies.
 function freeUpItems() {
-  if (!lastMove) return [];
+  if (!lastMove || !lastMove.allowFreeUp) return [];
   const p = process.platform;
   const toRoot = normaliseRoot(lastMove.toRoot, p);
   const fromRoots = lastMove.fromRoots.map(r => normaliseRoot(r, p));
@@ -461,6 +491,58 @@ function freeUpItems() {
   }
   return items;
 }
+
+// ── IPC: Archive integrity record ─────────────────────────────────────────────
+// After an Archive copy, every file in the archive is hashed into
+// <archive>/holdfast-integrity.jsonl. Re-checking re-hashes every file (no
+// cache) and compares, to catch silent corruption, edits, and losses.
+let integrityWorker = null;
+function measureFolder(root, onProgress) {
+  return new Promise((resolve, reject) => {
+    if (integrityWorker) { try { integrityWorker.terminate(); } catch {} }
+    const w = new Worker(INTEGRITY_WORKER_PATH, { workerData: { root } });
+    integrityWorker = w;
+    w.on('message', (m) => {
+      if (m.type === 'progress') onProgress && onProgress(m);
+      else if (m.type === 'done') { integrityWorker = null; resolve({ entries: m.entries }); }
+      else if (m.type === 'cancelled') { integrityWorker = null; resolve({ cancelled: true }); }
+      else if (m.type === 'error') { integrityWorker = null; reject(new Error(m.message)); }
+    });
+    w.on('error', (e) => { integrityWorker = null; reject(e); });
+  });
+}
+handle('archive:cancel', async () => { if (integrityWorker) integrityWorker.postMessage({ type: 'cancel' }); return true; });
+
+handle('archive:record', async (event) => {
+  if (!lastMove || lastMove.job !== 'archive') throw new Error('Run Archive backup first');
+  const root = lastMove.toRoot;
+  const win = BrowserWindow.fromWebContents(event.sender);
+  const m = await measureFolder(root, (p) => win?.webContents.send('archive:progress', { phase: 'record', ...p }));
+  if (m.cancelled) return { cancelled: true };
+  const good = m.entries.filter(e => e.h);
+  const target = path.join(root, RECORD_NAME);
+  const tmp = target + '.tmp';
+  await fs.promises.writeFile(tmp, serializeRecord(good, { root }));
+  await fs.promises.rename(tmp, target);
+  return { files: good.length, bytes: good.reduce((a, e) => a + e.s, 0), unreadable: m.entries.filter(e => !e.h), path: target };
+});
+
+handle('archive:verify', async (event, root) => {
+  if (typeof root !== 'string' || !root) throw new Error('Choose an archive folder');
+  let record;
+  try { record = parseRecord(await fs.promises.readFile(path.join(root, RECORD_NAME), 'utf8')); }
+  catch (e) { throw new Error(e.code === 'ENOENT' ? `No integrity record in ${root} — archive it with Holdfast first` : e.message); }
+  const win = BrowserWindow.fromWebContents(event.sender);
+  const m = await measureFolder(root, (p) => win?.webContents.send('archive:progress', { phase: 'verify', ...p }));
+  if (m.cancelled) return { cancelled: true };
+  const r = compareRecord(record.entries, m.entries);
+  const cap = (a) => a.slice(0, 5000);
+  return {
+    root, recordedAt: record.header.createdAt, recordedFiles: record.entries.length,
+    ok: r.ok.length, corrupted: cap(r.corrupted), modified: cap(r.modified), missing: cap(r.missing), added: cap(r.added), unreadable: cap(r.unreadable),
+    counts: { corrupted: r.corrupted.length, modified: r.modified.length, missing: r.missing.length, added: r.added.length, unreadable: r.unreadable.length },
+  };
+});
 
 handle('move:freeUpSummary', async () => {
   const items = freeUpItems();

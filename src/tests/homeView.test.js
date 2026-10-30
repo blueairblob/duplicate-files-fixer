@@ -32,11 +32,25 @@ const startFind = (el) => Array.from(el.querySelectorAll('button')).filter(b => 
 const flush = () => act(async () => { await Promise.resolve(); });
 
 describe('HomeView jobs', () => {
-  it('offers three jobs in the order a backup happens, Move to backup first', () => {
+  it('offers five stages in the order data travels, Import first', () => {
     const { el } = render();
-    const jobs = Array.from(el.querySelectorAll('[aria-label="What do you want to do?"] button')).map(b => b.textContent);
-    expect(jobs).toEqual(['Move to backup', 'Check a backup', 'Find duplicates']);
-    expect(el.querySelector('h1').textContent).toBe('Move to backup');
+    const jobs = Array.from(el.querySelectorAll('[aria-label="What do you want to do?"] button')).map(b => b.getAttribute('aria-label'));
+    expect(jobs).toEqual(['Import from device', 'Move to backup', 'Check backup', 'Clean up duplicates', 'Archive backup']);
+    expect(el.querySelector('h1').textContent).toBe('Import from device');
+  });
+
+  it('Import copies into the Inbox, and also skips what the backup already has', async () => {
+    const { el, started } = render({ job: 'import', protectedFolders: ['/inbox', '/nas'], targetFolders: ['/sd/DCIM'] });
+    click(button(el, /^See what’s new$/));
+    await flush();
+    expect(started[0]).toMatchObject({ job: 'import', mode: 'compare', protectedFolders: ['/inbox', '/nas'], targetFolders: ['/sd/DCIM'], confidence: 'thorough' });
+  });
+
+  it('Archive copies the backup into the archive folder', async () => {
+    const { el, started } = render({ job: 'archive', protectedFolders: ['/offline'], targetFolders: ['/nas/Photos'] });
+    click(button(el, /^See what to archive$/));
+    await flush();
+    expect(started[0]).toMatchObject({ job: 'archive', mode: 'compare', protectedFolders: ['/offline'], targetFolders: ['/nas/Photos'], confidence: 'thorough' });
   });
 
   it('Move to backup scans the backup as protected and the local copy as target, always Thorough', async () => {
@@ -75,9 +89,9 @@ describe('HomeView jobs', () => {
   });
 
   it('old history entries map onto the new jobs', () => {
-    expect(render({ mode: 'verify', protectedFolders: ['/a'], targetFolders: ['/b'] }).el.querySelector('h1').textContent).toBe('Check a backup');
-    expect(render({ mode: 'compare', protectedFolders: ['/a'], targetFolders: ['/b'] }).el.querySelector('h1').textContent).toBe('Check a backup');
+    expect(render({ mode: 'verify', protectedFolders: ['/a'], targetFolders: ['/b'] }).el.querySelector('h1').textContent).toBe('Check backup');
+    expect(render({ mode: 'compare', protectedFolders: ['/a'], targetFolders: ['/b'] }).el.querySelector('h1').textContent).toBe('Check backup');
     const simple = render({ mode: 'simple', protectedFolders: [], targetFolders: ['/x'] }).el;
-    expect(simple.querySelector('h1').textContent).toBe('Find duplicates');
+    expect(simple.querySelector('h1').textContent).toBe('Clean up duplicates');
   });
 });

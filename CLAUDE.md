@@ -44,7 +44,12 @@ Three process layers:
 ### Key cross-file behaviors
 
 - **Scan lifecycle lives in `App.jsx`, not `ScanView`.** The user can navigate away mid-scan; `ScanView` only renders `scan.progress`. `runIdRef` invalidates stale completions after cancel/re-scan. View routing is a `view` state machine (`home` | `scanning` | `results` | `verify` | `done`) plus a sidebar `section` when on home.
-- **Three user-facing jobs** (`config.job`, see `jobOf` in `utils/scanHistory.js`; old history entries map `simple`→find, `compare`/`verify`→compare):
+- **Five user-facing stages** (`config.job`, see `jobOf`/`JOB_LABELS` in `utils/scanHistory.js`; old history entries map `simple`→find, `compare`/`verify`→compare):
+  - **Transfer jobs share one engine and one screen** (`MoveView`, worded per job): `import` (device → Inbox; protectedFolders = [Inbox, optional backup]), `move`, and `archive` (backup → archive, mirror layout). Only `move` may free up the source; `lastMove.allowFreeUp` is enforced in main.
+  - **Import from device**: `fs:listDevices` (`locations.getRemovableDevices`) offers removable drives and their DCIM folders. Phones (MTP) aren't supported yet; `tools/probe-phone.ps1` is the trial.
+  - **Archive integrity**:
+    - `archive:record` (after an archive copy) runs `integrityWorker.js` to hash every file into `<archive>/holdfast-integrity.jsonl` (`integrity.js` format).
+    - `archive:verify` re-hashes with no cache and compares: ok / corrupted (same size+date, different bytes) / modified / missing / added / unreadable. UI: `IntegrityView`, opened from the Archive stage.
   - **Move to backup** (`move`): From (local device copy, targetFolders) → To (one backup folder, protectedFolders), engine `compare`, always Thorough.
     - The worker adds `result.move` (`movePlan.buildMovePlan`: newFiles / inBackup / unreadable), and main keeps `lastMove`.
     - `move:copy` runs `copyFiles.executeCopy`: Year/Month or same-folders layout (`movePlan.destinationFor`, mirrored for previews in `utils/movePreview.js`). It copies to `.holdfast-partial`, hash-compares, renames, preserves mtime, and never overwrites.

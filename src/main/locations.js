@@ -135,6 +135,40 @@ async function getLinuxLocations() {
   return locations;
 }
 
+// Removable drives (SD cards, cameras in storage mode, USB sticks), with
+// their DCIM folder when there is one — the starting point for Import.
+async function getRemovableDevices() {
+  const out = [];
+  const withDcim = async (label, root) => {
+    for (const d of ['DCIM', 'dcim']) {
+      const p = path.join(root, d);
+      if (await exists(p)) return out.push({ label, path: root, dcim: p });
+    }
+    out.push({ label, path: root, dcim: null });
+  };
+  if (process.platform === 'win32') {
+    const json = await runCapture('powershell', ['-NoProfile', '-Command',
+      'Get-CimInstance Win32_LogicalDisk -Filter "DriveType=2" | Select-Object DeviceID,VolumeName | ConvertTo-Json -Compress']);
+    for (const d of (json ? parseJsonList(json) || [] : [])) {
+      if (d.DeviceID) await withDcim(`${d.VolumeName || 'Removable drive'} (${d.DeviceID})`, d.DeviceID + '\\');
+    }
+  } else if (process.platform === 'darwin') {
+    for (const v of await readDir('/Volumes')) {
+      if (v.name !== 'Macintosh HD' && (v.isDirectory() || v.isSymbolicLink())) await withDcim(v.name, `/Volumes/${v.name}`);
+    }
+  } else {
+    for (const base of ['/media', '/run/media']) {
+      for (const u of await readDir(base)) {
+        if (!u.isDirectory()) continue;
+        for (const v of await readDir(path.join(base, u.name))) {
+          if (v.isDirectory()) await withDcim(v.name, path.join(base, u.name, v.name));
+        }
+      }
+    }
+  }
+  return out;
+}
+
 async function getLocations() {
   const home = os.homedir();
   const locations = [{ label: 'Home', path: home, icon: 'home' }];
@@ -148,4 +182,4 @@ async function getLocations() {
   return locations;
 }
 
-module.exports = { getLocations };
+module.exports = { getLocations, getRemovableDevices };

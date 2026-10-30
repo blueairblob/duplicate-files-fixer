@@ -42,7 +42,28 @@ function ConfirmFreeUp({ count, bytes, fromLabel, onConfirm, onClose, scale, s }
   );
 }
 
+// One screen for the three transfer stages. They share the engine (copy
+// only what the destination doesn't already have, verify every copy) and
+// differ in wording and in what may happen afterwards.
+const JOBS = {
+  import: {
+    to: 'Inbox', have: 'Already imported or backed up', copyVerb: 'Import', layouts: true, freeUp: false, record: false,
+    nothingNew: '✓ Everything on this device is already imported',
+    note: 'Nothing on the device is changed. When you’re happy, delete the photos or format the card in the camera.',
+  },
+  move: {
+    to: 'backup', have: 'Already in the backup', copyVerb: 'Copy', layouts: true, freeUp: true, record: false,
+    nothingNew: '✓ Everything here is already in the backup',
+  },
+  archive: {
+    to: 'archive', have: 'Already in the archive', copyVerb: 'Archive', layouts: false, freeUp: false, record: true,
+    nothingNew: '✓ Everything in the backup is already in the archive',
+    note: 'The archive mirrors the backup’s folders. The backup is never changed.',
+  },
+};
+
 export default function MoveView({ scanResult, scanConfig, onDone, onBack }) {
+  const J = JOBS[scanConfig?.job] || JOBS.move;
   const { scale } = useDPR();
   const s = useMemo(() => ({
     ...makeTableStyles(scale),
@@ -66,7 +87,8 @@ export default function MoveView({ scanResult, scanConfig, onDone, onBack }) {
   const fromLabel = fromRoots.length === 1 ? leaf(fromRoots[0]) : `${fromRoots.length} folders`;
 
   const [tab, setTab] = useState('new');
-  const [layout, setLayout] = useState('date');
+  const [layout, setLayout] = useState(scanConfig?.job === 'archive' ? 'folders' : 'date');
+  const [record, setRecord] = useState(null);           // archive: { running, progress, result, error }
   const [sorts, setSorts] = useState({});
   const [stage, setStage] = useState('plan');          // plan → copying → copied
   const [progress, setProgress] = useState(null);
@@ -97,8 +119,8 @@ export default function MoveView({ scanResult, scanConfig, onDone, onBack }) {
 
   const remaining = newRows.filter(r => !r.done);
   const TABS = {
-    new:        { label: 'New — to copy', rows: newRows, empty: 'Nothing new — everything here is already in the backup.' },
-    inBackup:   { label: 'Already in the backup', rows: inBackupRows, empty: 'None of these files are in the backup yet.' },
+    new:        { label: 'New — to copy', rows: newRows, empty: `Nothing new — ${J.nothingNew.replace('✓ ', '').toLowerCase()}.` },
+    inBackup:   { label: J.have, rows: inBackupRows, empty: `Nothing here is in the ${J.to} yet.` },
     unreadable: { label: "Couldn't be read", rows: unreadRows, empty: 'Nothing here.' },
   };
   const current = TABS[tab];
@@ -119,7 +141,7 @@ export default function MoveView({ scanResult, scanConfig, onDone, onBack }) {
           { key: 'name', label: 'File', width: '22%', title: r => r.path },
           { key: 'folder', label: 'Folder here', width: '28%', rtl: true, muted: true, title: r => r.folder },
           { key: 'size', label: 'Size', numeric: true, width: '10%', render: r => formatSize(r.size) },
-          { key: 'backup', label: 'Same file in backup', width: '40%', rtl: true, muted: true, title: r => r.backup },
+          { key: 'backup', label: `Same file in ${J.to}`, width: '40%', rtl: true, muted: true, title: r => r.backup },
         ]
       : [
           { key: 'name', label: 'File', width: '30%', title: r => r.path },
@@ -142,6 +164,22 @@ export default function MoveView({ scanResult, scanConfig, onDone, onBack }) {
     }
     setStage('copied');
     refreshSummary();
+    if (J.record) writeRecord();
+  };
+
+  // Archive: fingerprint every file in the archive into its integrity record.
+  const writeRecord = async () => {
+    if (!api?.archiveRecord) return;
+    setRecord({ running: true, progress: null });
+    api.onArchiveProgress?.(p => setRecord(r => ({ ...r, progress: p })));
+    try {
+      const result = await api.archiveRecord();
+      setRecord({ running: false, result });
+    } catch (e) {
+      setRecord({ running: false, error: e.message });
+    } finally {
+      api.removeArchiveProgress?.();
+    }
   };
 
   const freeUp = async () => {
@@ -183,17 +221,17 @@ export default function MoveView({ scanResult, scanConfig, onDone, onBack }) {
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ ...s.big, color: newRows.length ? 'var(--text-primary)' : 'var(--success)' }}>
             {newRows.length
-              ? `${newRows.length.toLocaleString()} new file${newRows.length !== 1 ? 's' : ''} to copy · ${formatSize(sum(newRows))}`
-              : '✓ Everything here is already in the backup'}
+              ? `${newRows.length.toLocaleString()} new file${newRows.length !== 1 ? 's' : ''} to copy to the ${J.to} · ${formatSize(sum(newRows))}`
+              : J.nothingNew}
           </div>
           <div style={s.sub}>
-            {inBackupRows.length.toLocaleString()} file{inBackupRows.length !== 1 ? 's are' : ' is'} already in the backup ({formatSize(sum(inBackupRows))}), matched byte for byte wherever they are in it.
+            {inBackupRows.length.toLocaleString()} file{inBackupRows.length !== 1 ? 's are' : ' is'} already in the {J.to} ({formatSize(sum(inBackupRows))}), matched byte for byte wherever they are in it.{J.note ? ` ${J.note}` : ''}
             {unreadRows.length > 0 && ` ${unreadRows.length.toLocaleString()} couldn't be read and will be left alone.`}
           </div>
         </div>
         {stage === 'plan' && newRows.length > 0 && (
           <>
-            <div style={s.seg} role="group" aria-label="Where new files go">
+            {J.layouts && <div style={s.seg} role="group" aria-label="Where new files go">
               {[['date', 'Year / Month'], ['folders', 'Same folders']].map(([id, label]) => (
                 <button key={id} aria-pressed={layout === id} onClick={() => setLayout(id)} style={{
                   padding: `${scale(4)}px ${scale(12)}px`, borderRadius: scale(6), font: 'inherit', fontSize: scale(12), cursor: 'pointer',
@@ -201,9 +239,9 @@ export default function MoveView({ scanResult, scanConfig, onDone, onBack }) {
                   background: layout === id ? 'var(--bg-card)' : 'transparent', color: layout === id ? 'var(--text-primary)' : 'var(--text-secondary)',
                 }}>{label}</button>
               ))}
-            </div>
+            </div>}
             <button style={s.btnPrimary} onClick={copy} disabled={!api}>
-              Copy {newRows.length.toLocaleString()} file{newRows.length !== 1 ? 's' : ''} to backup <ChevronRightIcon size={scale(13)} />
+              {J.copyVerb} {newRows.length.toLocaleString()} file{newRows.length !== 1 ? 's' : ''} <ChevronRightIcon size={scale(13)} />
             </button>
           </>
         )}
@@ -239,8 +277,31 @@ export default function MoveView({ scanResult, scanConfig, onDone, onBack }) {
         </div>
       )}
 
+      {/* Archive: integrity record */}
+      {J.record && (record || (stage === 'plan' && newRows.length === 0)) && (
+        <div style={{ ...s.card, borderColor: record?.error ? 'var(--danger)' : record?.result ? 'var(--success)' : 'var(--border)' }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ ...s.big, color: record?.error ? 'var(--danger)' : record?.result && !record.result.cancelled ? 'var(--success)' : 'var(--text-primary)' }}>
+              {record?.running ? `Writing the integrity record… ${record.progress?.total ? `${record.progress.done.toLocaleString()} of ${record.progress.total.toLocaleString()} files` : ''}`
+                : record?.error ? `Couldn't write the integrity record: ${record.error}`
+                : record?.result?.cancelled ? 'Integrity record stopped — it was not written'
+                : record?.result ? `✓ Integrity record written: ${record.result.files.toLocaleString()} files · ${formatSize(record.result.bytes)}`
+                : 'Integrity record'}
+            </div>
+            <div style={s.sub}>
+              {record?.result && !record.result.cancelled
+                ? <>Saved as <code>{record.result.path}</code>. Use <strong>Re-check an archive</strong> on the Archive page to test it for damage later.</>
+                : 'Every file in the archive is read and fingerprinted, so it can be re-checked for silent damage or changes later.'}
+            </div>
+          </div>
+          {record?.running
+            ? <button style={s.btn} onClick={() => api?.archiveCancel?.()}>Stop</button>
+            : !record?.result || record.result.cancelled ? <button style={s.btn} onClick={writeRecord} disabled={!api}>Write integrity record</button> : null}
+        </div>
+      )}
+
       {/* Free up space */}
-      {!busy && freeSummary && freeSummary.files > 0 && (
+      {J.freeUp && !busy && freeSummary && freeSummary.files > 0 && (
         <div style={s.card}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={s.big}>Free up {formatSize(freeSummary.bytes)} on this computer</div>
