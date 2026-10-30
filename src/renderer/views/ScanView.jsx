@@ -16,7 +16,8 @@ function formatDuration(ms) {
 // so this view can unmount/remount freely while the scan continues.
 export default function ScanView({ scanConfig, progress, startedAt, cancelling, onCancel }) {
   const { scale } = useDPR();
-  const { mode, protectedFolders = [], targetFolders = [], filters = {}, autoMarkRule, includeEmpty } = scanConfig || {};
+  const { mode, job, protectedFolders = [], targetFolders = [], filters = {}, autoMarkRule, includeEmpty } = scanConfig || {};
+  const isCompareJob = job ? job === 'compare' : mode === 'compare';
 
   const { scanned = 0, phase = 'walking', total = 0, currentPath = '' } = progress || {};
 
@@ -170,12 +171,12 @@ export default function ScanView({ scanConfig, progress, startedAt, cancelling, 
           width: '100%', display: 'flex', flexDirection: 'column', gap: scale(10),
         }}>
           {mode === 'compare' && protectedFolders.length > 0 && (
-            <FolderGroup label="Protected source" Icon={ShieldIcon} color="var(--accent)" folders={protectedFolders} scale={scale} />
+            <FolderGroup label={isCompareJob ? 'Original' : 'Keep'} Icon={ShieldIcon} color="var(--accent)" folders={protectedFolders} scale={scale} />
           )}
           <FolderGroup
-            label={mode === 'compare' ? 'Scan target' : mode === 'verify' ? 'Backup' : 'Scanning'}
-            Icon={mode === 'compare' ? TargetIcon : SearchIcon}
-            color={mode === 'compare' ? 'var(--danger)' : 'var(--accent)'}
+            label={isCompareJob ? 'Copy' : 'Searching'}
+            Icon={isCompareJob ? TargetIcon : SearchIcon}
+            color="var(--accent)"
             folders={targetFolders} scale={scale}
           />
         </div>

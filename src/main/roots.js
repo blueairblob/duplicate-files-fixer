@@ -59,7 +59,8 @@ function canonical(p, { platform, mappings, realpaths } = {}) {
  * @param {string}   args.platform   process.platform
  * @param {Array}    [args.mappings] mapped network drives (Windows)
  * @param {object}   [args.realpaths] given path -> resolved real path
- * @returns {{ blocked: Array<{protected:string,target:string,reason:string}>, excludeFromTarget: string[] }}
+ * @returns {{ blocked: Array<{protected:string,target:string,code:string,reason:string}>, excludeFromTarget: string[] }}
+ *   code: 'same' | 'target-inside-protected' (lets each screen word it its own way)
  *   excludeFromTarget holds normalised paths (see normaliseRoot) in the
  *   target's own path form, ready to compare against walked directories.
  */
@@ -74,9 +75,9 @@ function analyseRoots({ protectedRoots = [], targetRoots = [], platform, mapping
     for (const p of protectedRoots) {
       const cp = canonical(p, opts);
       if (cp === ct) {
-        blocked.push({ protected: p, target: t, reason: 'The protected source and the scan target are the same folder.' });
+        blocked.push({ protected: p, target: t, code: 'same', reason: 'The protected source and the scan target are the same folder.' });
       } else if (isInside(ct, cp)) {
-        blocked.push({ protected: p, target: t, reason: 'The scan target is inside the protected source.' });
+        blocked.push({ protected: p, target: t, code: 'target-inside-protected', reason: 'The scan target is inside the protected source.' });
       } else if (isInside(cp, ct)) {
         // Express the protected folder in the target's own path form, since
         // that is the string the worker sees while walking the target.

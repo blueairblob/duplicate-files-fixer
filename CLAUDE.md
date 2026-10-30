@@ -30,7 +30,7 @@ Requires Node 20.12+ (Vite 8 needs `util.styleText`; Node 18 crashes). On Window
 Three process layers:
 
 1. **Main process** (`src/main/main.js`, CommonJS): window creation, all `ipcMain` handlers (folder dialogs, platform-specific location detection for Windows/macOS/Linux/WSL, directory listing, exclusions, delete/quarantine/restore, signature cache info/clear). Spawns one scan worker per scan and forwards its messages to the renderer as `scan:progress`.
-2. **Scan worker** (`src/main/scanWorker.js`, `worker_threads`): all scanning. Config arrives via `workerData`; messages out are `progress` / `done` / `cancelled` / `error`; message in is `cancel`. Pipeline: async walk (stat only) -> group by size -> 64 KB head-only "boundary" hash -> full SHA-256 for remaining collisions. `confidence` (`quick` | `standard` | `thorough`) controls how far down that pipeline it goes. Modes: `simple`, `compare` (protected source vs target; produces a `census` of in-both / source-only / target-only / unreadable), `verify` (is every **source** = `protectedFolders` file present in the **backup** = `targetFolders`?). The worker only does I/O; the decisions (type filter, grouping, auto-mark, census, verify report) live in pure `scanCore.js`. With no type filter every file is scanned.
+2. **Scan worker** (`src/main/scanWorker.js`, `worker_threads`): all scanning. Config arrives via `workerData`; messages out are `progress` / `done` / `cancelled` / `error`; message in is `cancel`. Pipeline: async walk (stat only) -> group by size -> 64 KB head-only "boundary" hash -> full SHA-256 for remaining collisions. `confidence` (`quick` | `standard` | `thorough`) controls how far down that pipeline it goes. Engine modes: `simple` (duplicates among `targetFolders`) and `compare` (`protectedFolders` are never touched; produces a `census` of in-both / source-only / target-only / unreadable). The worker only does I/O; the decisions (type filter, grouping, auto-mark, census, verify report) live in pure `scanCore.js`. With no type filter every file is scanned.
 3. **Renderer** (`src/renderer/`, ESM React 18): talks to main only through `window.electronAPI` from `src/main/preload.js`. Adding an IPC call means touching main.js handler + preload.js bridge + caller.
 
 ### Security rules (security.js)
@@ -44,7 +44,10 @@ Three process layers:
 ### Key cross-file behaviors
 
 - **Scan lifecycle lives in `App.jsx`, not `ScanView`.** The user can navigate away mid-scan; `ScanView` only renders `scan.progress`. `runIdRef` invalidates stale completions after cancel/re-scan. View routing is a `view` state machine (`home` | `scanning` | `results` | `verify` | `done`) plus a sidebar `section` when on home.
-- **Compare results route through `CompareView` first** (when `result.census` exists). It drills down into `ResultsView` with a scoped file selection. Simple-mode results go straight to `ResultsView`.
+- **Two user-facing jobs** (`config.job`, see `jobOf` in `utils/scanHistory.js`; old history entries map `simple`→find, `compare`/`verify`→compare):
+  - **Find duplicates**: folders, each optionally marked **Keep**. With Keep folders it runs engine `compare` (Keep = protectedFolders); without them, engine `simple`. Results go straight to `ResultsView`.
+  - **Compare folders**: **Original** (protectedFolders) vs **Copy** (targetFolders), engine `compare`, default Thorough. It lands on `CompareView`: a verdict (census.sourceOnly = missing from the Copy), bar/boxes choosing the list, and a sortable panel. "Review and delete" drills into `ResultsView` with a scoped selection; Compare UI state lives in App (`compareUi`).
+  - There is no separate Verify mode any more.
 - **Demo mode:** when `window.electronAPI` is absent (plain browser via `npm run dev:renderer`), `App.jsx` fakes scan progress and results.
 - **Delete safety chain** (all decided in main; the renderer only sends paths via `files:delete`):
   - `roots.js` blocks overlapping/aliased roots at scan start (also via `scan:checkRoots` from Home) and gives the worker protected subtrees to skip. The worker dedupes files by `dev:ino` identity.

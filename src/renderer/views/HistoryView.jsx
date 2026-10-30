@@ -1,6 +1,6 @@
 import React from 'react';
 import { useDPR } from '../contexts/DPRContext.jsx';
-import { entryTitle, entrySubtitle, CONFIDENCE_SHORT } from '../utils/scanHistory.js';
+import { entryTitle, entrySubtitle, CONFIDENCE_SHORT, jobOf } from '../utils/scanHistory.js';
 import { ShieldIcon, TargetIcon, SearchIcon, XIcon, ArrowRightIcon, HistoryIcon } from '../components/icons.jsx';
 
 // History section page. Clicking "Load setup" (or the row) seeds New scan
@@ -42,9 +42,12 @@ export default function HistoryView({ entries, onLoadEntry, onRemoveEntry, onCle
             background: 'var(--bg-card)', overflow: 'hidden',
           }}>
             {entries.map((e, i) => {
-              const ModeIcon = e.mode === 'simple' ? SearchIcon : e.mode === 'verify' ? ShieldIcon : TargetIcon;
+              const ModeIcon = jobOf(e) === 'find' ? SearchIcon : ShieldIcon;
               return (
                 <div key={e.id}
+                  role="button" tabIndex={0}
+                  aria-label={`Load ${entryTitle(e)}`}
+                  onKeyDown={ev => { if (ev.target === ev.currentTarget && (ev.key === 'Enter' || ev.key === ' ')) { ev.preventDefault(); onLoadEntry(e); } }}
                   onClick={() => onLoadEntry(e)}
                   style={{
                     display: 'flex', alignItems: 'center', gap: scale(12),

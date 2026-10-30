@@ -24,7 +24,7 @@ const { isExcluded, compileExclusions } = require('./exclusions');
 // Compiled once per scan; matched only below each scan root.
 const EXCLUSIONS = compileExclusions(workerData.exclusions || []);
 const { normaliseRoot } = require('./roots');
-const { shouldIncludeFile, sizeCandidates, buildGroups, buildCensus, censusProblems, buildVerifyReport } = require('./scanCore');
+const { shouldIncludeFile, sizeCandidates, buildGroups, buildCensus, censusProblems } = require('./scanCore');
 
 // Protected folders that sit inside a target root (normalised, see roots.js).
 // The target walk skips them so protected files are never seen as target files.
@@ -398,7 +398,7 @@ async function run() {
   // ── Pass 1: walk all folders, collect file metadata (cheap) ──────────────
   // Protected roots finish before target roots start: identity dedupe keeps
   // the first sighting, and it must be the protected one.
-  if (mode === 'compare' || mode === 'verify') {
+  if (mode === 'compare') {
     await walkRoots(protectedFolders || [], 'protected', filters || {}, allFiles, warnings, counter);
     if (!cancelled) await walkRoots(targetFolders || [], 'target', filters || {}, allFiles, warnings, counter);
   } else {
@@ -516,10 +516,8 @@ async function run() {
   }
 
   // ── Duplicate groups (compare / simple modes) ────────────────────────────
-  const groups = mode === 'verify' ? [] : buildGroups(fileMap, mode, autoMarkRule);
+  const groups = buildGroups(fileMap, mode, autoMarkRule);
 
-  // ── Verify report: is every source file in the backup? ───────────────────
-  const verifyReport = mode === 'verify' ? buildVerifyReport(nonEmptyFiles, fileMap, unreadable) : null;
 
   // ── Empty file groups ─────────────────────────────────────────────────────
   const emptyGroups = (includeEmpty && emptyFiles.length > 0)
@@ -545,7 +543,6 @@ async function run() {
       warnings,
       mode,
       confidence: CONFIDENCE,
-      verifyReport,
       census,
     },
   });

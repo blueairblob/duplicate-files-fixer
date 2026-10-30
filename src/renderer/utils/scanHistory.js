@@ -25,6 +25,7 @@ export function addHistoryEntry(config) {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     date: new Date().toISOString(),
     mode: config.mode,
+    job: jobOf(config),
     protectedFolders: config.protectedFolders || [],
     targetFolders: config.targetFolders || [],
     confidence: config.confidence || 'standard',
@@ -63,7 +64,13 @@ export function clearHistory() {
 }
 
 // ── Display helpers ──────────────────────────────────────────────────────────
-const MODE_LABELS = { compare: 'Compare', simple: 'Simple scan', verify: 'Verify backup' };
+// The app has two jobs. Older entries only have a scan mode: 'simple' was
+// Find duplicates; 'compare' and 'verify' are now Compare folders.
+export const JOB_LABELS = { find: 'Find duplicates', compare: 'Compare folders' };
+export function jobOf(e) {
+  if (e && (e.job === 'find' || e.job === 'compare')) return e.job;
+  return e && e.mode === 'simple' ? 'find' : 'compare';
+}
 
 function leaf(p) {
   const parts = String(p).split(/[\\/]/).filter(Boolean);
@@ -73,9 +80,9 @@ function leaf(p) {
 export function entryTitle(e) {
   const src = e.protectedFolders[0] ? leaf(e.protectedFolders[0]) : null;
   const tgt = e.targetFolders[0] ? leaf(e.targetFolders[0]) : null;
-  if (e.mode === 'simple') return tgt || 'Simple scan';
+  if (jobOf(e) === 'find') return tgt || src || JOB_LABELS.find;
   if (src && tgt) return `${src} vs ${tgt}`;
-  return MODE_LABELS[e.mode] || 'Scan';
+  return JOB_LABELS.compare;
 }
 
 export function entrySubtitle(e) {
@@ -87,7 +94,7 @@ export function entrySubtitle(e) {
     : sameDay(d, yesterday) ? 'Yesterday'
     : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
   if (e.status !== 'complete') return `${when} \u00b7 not completed`;
-  const dupes = e.mode === 'verify' ? MODE_LABELS.verify : `${e.duplicateGroups} dupes`;
+  const dupes = jobOf(e) === 'compare' ? JOB_LABELS.compare : `${e.duplicateGroups} dupes`;
   return `${when} \u00b7 ${dupes}`;
 }
 

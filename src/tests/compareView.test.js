@@ -55,18 +55,18 @@ const cellTexts = (el, col) => Array.from(el.querySelectorAll('tbody tr')).map(t
 describe('CompareView', () => {
   it('opens on "Only in target", with that box highlighted and a footer', () => {
     const { el } = render();
-    expect(title(el)).toMatch(/^Only in the target/);
-    expect(buttons(el, /^1Only in target/)[0].getAttribute('aria-pressed')).toBe('true');
+    expect(title(el)).toMatch(/^Only in the Copy/);
+    expect(buttons(el, /^1Only in Copy/)[0].getAttribute('aria-pressed')).toBe('true');
     expect(cellTexts(el, 0)).toEqual(['only-tgt.jpg']);
     expect(el.querySelector('section').textContent).toMatch(/1 file · 70\.0 B/);
   });
 
   it('bar segments switch the list, just like the boxes', () => {
     const { el } = render();
-    click(el.querySelector('[aria-label="1 only in source"]'));
-    expect(title(el)).toMatch(/^Only in the protected source/);
-    expect(el.querySelector('[aria-label="1 only in source"]').getAttribute('aria-pressed')).toBe('true');
-    expect(buttons(el, /^1Only in source/)[0].getAttribute('aria-pressed')).toBe('true');
+    click(el.querySelector('[aria-label="1 only in Original"]'));
+    expect(title(el)).toMatch(/^Only in the Original/);
+    expect(el.querySelector('[aria-label="1 only in Original"]').getAttribute('aria-pressed')).toBe('true');
+    expect(buttons(el, /^1Only in Original/)[0].getAttribute('aria-pressed')).toBe('true');
   });
 
   it('"In both" lists target files with their source copy, without leaving the page', () => {
@@ -74,7 +74,7 @@ describe('CompareView', () => {
     click(buttons(el, /^2In both/)[0]);
     expect(calls).toEqual([]);                                  // no navigation
     expect(title(el)).toMatch(/^In both/);
-    expect(el.querySelector('thead').textContent).toMatch(/Copy in source/);
+    expect(el.querySelector('thead').textContent).toMatch(/Same file in Original/);
     expect(cellTexts(el, 3)).toEqual(['/s/big.jpg', '/s/a.jpg']); // default sort: largest first
     click(buttons(el, /Review and delete/)[0]);
     expect(calls).toEqual([[null]]);
@@ -94,7 +94,7 @@ describe('CompareView', () => {
     const { el, calls } = render();
     click(buttons(el, /^2In both/)[0]);
     click(buttons(el, /^By folder$/)[0]);
-    expect(el.querySelector('thead').textContent).toMatch(/In source/);
+    expect(el.querySelector('thead').textContent).toMatch(/In Original/);
     click(el.querySelector('[aria-label="Select A"]'));
     click(buttons(el, /Review 2 selected/)[0]);
     expect(calls).toEqual([[['/t/A/a.jpg', '/t/A/big.jpg'], 'A']]);
@@ -103,15 +103,30 @@ describe('CompareView', () => {
   it('quick match opens on "In both" and disables "Only in target"', () => {
     const { el } = render({ scanResult: result('quick') });
     expect(title(el)).toMatch(/matched by name and size/);
-    expect(buttons(el, /Only in target/)[0].disabled).toBe(true);
+    expect(buttons(el, /Only in Copy/)[0].disabled).toBe(true);
   });
 
   it('remembers the chosen list through ui/onUi', () => {
     let saved = null;
     const { el } = render({ onUi: (u) => { saved = u; } });
-    click(buttons(el, /^1Only in source/)[0]);
+    click(buttons(el, /^1Only in Original/)[0]);
     expect(saved.tab).toBe('sourceOnly');
     const again = render({ ui: saved });
-    expect(title(again.el)).toMatch(/^Only in the protected source/);
+    expect(title(again.el)).toMatch(/^Only in the Original/);
+  });
+
+  it('leads with the backup verdict, and links to the missing files', () => {
+    const { el } = render();
+    const status = el.querySelector('[role="status"]');
+    expect(status.textContent).toMatch(/1 Original file is missing from the Copy/);
+    click(buttons(el, /^Show missing files$/)[0]);
+    expect(title(el)).toMatch(/^Only in the Original/);
+  });
+
+  it('says everything is there when nothing is missing', () => {
+    const r = result();
+    r.census.sourceOnly = { files: 0, bytes: 0, list: [] };
+    const { el } = render({ scanResult: r });
+    expect(el.querySelector('[role="status"]').textContent).toMatch(/Everything in the Original is also in the Copy/);
   });
 });

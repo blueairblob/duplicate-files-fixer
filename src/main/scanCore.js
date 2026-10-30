@@ -85,7 +85,9 @@ const LIST_CAP = 5000;
 // ── Census: the source-vs-target relationship (compare mode) ─────────────────
 //
 // Matching is CONTENT-ANYWHERE: a target file is "in both" when its content
-// exists anywhere in the protected source. Source-only is counted over
+// exists anywhere in the protected source. This also answers the backup
+// question (Compare folders' verdict): sourceOnly = Original files missing
+// from the Copy. Source-only is counted over
 // distinct source files (one source file can match many target copies).
 // Files that couldn't be read are their own bucket — never "not backed up".
 function buildCensus(files, fileMap, protectedFolders, targetFolders, unreadable = new Set()) {
@@ -160,50 +162,7 @@ function censusProblems(c) {
   return checks.filter(([, got, want]) => got !== want).map(([name, got, want]) => `${name}: ${got} !== ${want}`);
 }
 
-// ── Verify report: is every SOURCE file present in the BACKUP? ───────────────
-// protected = source (the originals), target = backup. Matching is
-// content-anywhere, like the census.
-//   missing     — source files with no copy in the backup (the risk)
-//   backedUp    — source files with a copy in the backup
-//   backupOnly  — backup files whose content isn't in the source (informational)
-//   unreadable  — couldn't be read, so unknown either way
-function buildVerifyReport(files, fileMap, unreadable = new Set()) {
-  const groupOf = groupIndex(fileMap);
-  const backedUp = [], missing = [], backupOnly = [], unreadableList = [];
-
-  for (const f of files) {
-    if (unreadable.has(f.path)) { unreadableList.push(f); continue; }
-    const g = groupOf.get(f.path);
-    if (f.sourceLabel === 'protected') {
-      const copy = g && g.find(x => x.sourceLabel === 'target');
-      if (copy) backedUp.push({ source: f, backup: copy });
-      else missing.push(f);
-    } else if (!(g && g.some(x => x.sourceLabel === 'protected'))) {
-      backupOnly.push(f);
-    }
-  }
-
-  const byPath = (a, b) => a.path.localeCompare(b.path);
-  missing.sort(byPath);
-  backupOnly.sort(byPath);
-  unreadableList.sort(byPath);
-  backedUp.sort((a, b) => a.source.path.localeCompare(b.source.path));
-
-  return {
-    backedUp, missing, backupOnly, unreadable: unreadableList,
-    summary: {
-      totalSource: files.filter(f => f.sourceLabel === 'protected').length,
-      totalBackup: files.filter(f => f.sourceLabel === 'target').length,
-      backedUpCount: backedUp.length, backedUpSize: sum(backedUp.map(m => m.source)),
-      missingCount: missing.length, missingSize: sum(missing),
-      backupOnlyCount: backupOnly.length, backupOnlySize: sum(backupOnly),
-      unreadableSourceCount: unreadableList.filter(f => f.sourceLabel === 'protected').length,
-      unreadableBackupCount: unreadableList.filter(f => f.sourceLabel === 'target').length,
-    },
-  };
-}
-
 module.exports = {
   TYPE_MAP, shouldIncludeFile, sizeCandidates, sortForKeep, buildGroups,
-  buildCensus, censusProblems, buildVerifyReport,
+  buildCensus, censusProblems,
 };

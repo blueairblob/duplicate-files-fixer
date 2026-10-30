@@ -170,15 +170,15 @@ async function main() {
   const d8 = xCopy ? await svc.deleteFiles(s7, { files: [{ path: xCopy }] }) : { trashed: [] };
   check('8  local duplicate goes to the Recycle Bin', d8.trashed.length === 1 && !(await exists(xCopy)), `${xCopy} → ${JSON.stringify({ trashed: d8.trashed, quarantined: d8.quarantined, failed: d8.failed })}`);
 
-  // ── 9. Verify: is every source file in the backup? (Phase B) ──
+  // ── 9. Compare folders: is every Original file in the Copy? ──
   // Source = local photos (a, b, c, d-renamed); backup = NAS dupes. c1 was
   // overwritten in step 5 and b1 is still quarantined, so b and c are missing.
   await put(path.join(LOCAL, 'photos', 'raw.cr2'), 'X');       // never backed up, non-allowlisted type
-  const v = await runScan({ mode: 'verify', protectedFolders: [path.join(LOCAL, 'photos')], targetFolders: [dupes], confidence: 'thorough' });
-  const missing = v.verifyReport.missing.map(f => path.basename(f.path)).sort();
-  check('9  verify lists source files missing from the backup (incl. .cr2)',
+  const v = await runScan({ mode: 'compare', protectedFolders: [path.join(LOCAL, 'photos')], targetFolders: [dupes], confidence: 'thorough' });
+  const missing = v.census.sourceOnly.list.map(f => path.basename(f.path)).sort();
+  check('9  Compare folders lists Original files missing from the Copy (incl. .cr2)',
     JSON.stringify(missing) === JSON.stringify(['b.jpg', 'c.jpg', 'raw.cr2']),
-    `missing=${missing.join(', ')} backedUp=${v.verifyReport.backedUp.length} backupOnly=${v.verifyReport.backupOnly.length}`);
+    `missing=${missing.join(', ')} inBoth=${v.census.matched.targetFiles} onlyInCopy=${v.census.targetOnly.files}`);
 
   // Leftover quarantined test file (b1) — removed in cleanup.
   return { leftovers: [qb1 && qb1.quarantinePath].filter(Boolean), ourQuarantinePaths: [qa1, qb1].filter(Boolean).map(e => e.quarantinePath) };

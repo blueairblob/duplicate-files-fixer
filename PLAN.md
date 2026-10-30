@@ -12,6 +12,7 @@
 | C — speed and scale | Parallel folder walk (≈3.5× on NAS); no blocking main-process I/O; cancellable pooled deletes; paginated Results; exclusions fixed and persisted |
 | D — ship-ready | Sandbox, CSP, navigation/IPC guards; packaged build with icon; smoke-test mode; CI on Windows/macOS/Linux |
 | E — polish | Self-test drives the real IPC path (found and fixed a delete-guard bug); accessibility pass; OS-native HiDPI scaling |
+| F — two jobs | Home reduced to **Find duplicates** (with per-folder Keep) and **Compare folders** (Original vs Copy, verdict first); Verify mode folded into Compare; Compare list panel with sortable columns |
 
 ## Decisions (2026-10-28)
 
@@ -23,6 +24,7 @@
 
 ## Next
 
+0. **Rename the app.** "Duplicate Files Fixer" is already a commercial Systweak product (Windows, Mac and Android). Pick a new name before any public release.
 1. **Real-world test pass**: work through `TESTING.md` on real data and fix what it finds.
 2. **Donation link**: a "Support this app" button in Settings that opens a fixed Buy Me a Coffee page through the main process. Needs the page URL.
 3. **Release pipeline**:

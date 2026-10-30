@@ -4,9 +4,11 @@ A working Electron + React prototype covering the core features from the PRD (se
 
 - Folder selection (browse, location picker, or drag-and-drop)
 - File type and size filters — with no type picked, **every** file is scanned (RAW photos, TIFFs, anything)
-- **Compare summary** — a scan lands on a summary of the *relationship* between the two folders, not a wall of file rows: totals for each side, how many files exist in both, what's only in the source, and what's only in the target. Every figure drills down.
+- **Two jobs, nothing else to learn:**
+  - **Find duplicates**: search one or more folders. Mark any folder **Keep** and it's compared against but never touched; its copies elsewhere are selected for removal. This is the "reference folder" idea from dupeGuru, Duplicate Cleaner and Czkawka.
+  - **Compare folders**: an **Original** against a **Copy**, such as a backup. You get a verdict ("✓ Everything in the Original is also in the Copy", or "⚠ 12 files are missing") and three lists: *Only in Original* (missing from the Copy), *In both*, and *Only in Copy*. Copies in "In both" can be reviewed and removed from the Copy side. Defaults to a Thorough (byte-for-byte) scan.
+- **Compare screen**: the colour bar and boxes pick the list. Each list sits in its own scrolling panel with sortable columns, a pinned footer, and a Files / By folder switch.
 - **Folder-level decisions** — folders that are fully duplicated collapse into a single row you can select in one click; folders that are only *partly* duplicated are surfaced first, because that's where judgement is actually needed. Selecting a partial folder marks only its duplicated files, never the ones that exist nowhere else.
-- **Backup-gap detection** — files present in the target but nowhere in the protected source are reported separately. These are the files that are *not* backed up.
 - **Match confidence** — choose how hard the scan works:
   - *Quick* — name and size only, no file contents read. Fastest; cannot detect renamed copies.
   - *Standard* (default) — 64 KB head hash. Good balance; the recommended setting for network drives.
@@ -14,18 +16,14 @@ A working Electron + React prototype covering the core features from the PRD (se
 - **Checked at delete time** — every file is re-checked against the scan and against the copy being kept just before it's removed: it must be unchanged, the kept copy must still exist and be a different physical file, and for Quick/Standard scans (or when the kept copy changed) the two are compared byte-for-byte. Anything that fails is skipped and reported.
 - **Signature cache** — file hashes are remembered between scans (keyed on path, size and mtime), so repeat scans of the same tree run at walk speed. Clearable from Settings.
 - **Concurrent worker-thread scanning** — the scan runs off the UI thread using async I/O through a bounded concurrency pool (default 32 in flight, with a per-drive cap). This hides per-file latency on NAS/network drives and keeps the worker responsive, so progress keeps flowing and Cancel takes effect immediately mid-walk.
-- **Three scan modes:**
-  - *Simple* — find duplicates within one or more folders
-  - *Compare* — protected source vs. scan target, with shield badges on protected files (never selectable for deletion)
-  - *Verify* — check that every file in the **source** (your originals) has a copy somewhere in the **backup**; reports missing-from-backup / backed-up / only-in-backup / couldn't-read. Defaults to a Thorough (byte-for-byte) scan.
-- Auto-mark rules: protected-wins, keep-newest, keep-oldest, keep-largest
+- Auto-mark rules (Find duplicates): a copy in a Keep folder always stays; otherwise keep the newest, oldest or largest.
 - **No-survivor guard** — deleting *every* copy in a group requires explicit acknowledgement, so you can't accidentally erase the last copy of a file
 - **Exclusion list** — pre-populated defaults (`node_modules`, `.git`, system folders, cloud sync caches), editable in-app
 - **Zero-byte file detection** — listed separately from content duplicates (for reference; not deleted)
 - **Scan warnings panel** — permission errors, locked files, etc. surfaced instead of silently skipped
 - Manual selection override, Select All / Deselect All
 - Confirm → delete to the **system Recycle Bin**, with a **quarantine fallback**: network drives (which have no Recycle Bin) and systems where the OS trash can't be reached use a `.dff-quarantine` folder on the **same drive** as the file. **Nothing is ever permanently deleted** — if neither works, the file is left in place and reported.
-- **Safety rules enforced in the main process** — protected files, overlapping folders (e.g. protected `D:\Photos` inside target `D:\`) and one folder reached by two paths (a mapped drive and its `\\nas` path) can never lead to deleting the only copy.
+- **Safety rules enforced in the main process** — Keep/Original files, overlapping folders (e.g. Keep `D:\Photos` inside `D:\`) and one folder reached by two paths (a mapped drive and its `\\nas` path) can never lead to deleting the only copy.
 - **Recovery panel** — browse every quarantine folder the app has used and restore files to their original location
 - Post-deletion summary screen
 
@@ -90,7 +88,7 @@ npx vitest run
 ```
 
 (or `npm test`). Suites in `src/tests/` import the real modules:
-- `scanCore`: type filters, grouping, auto-mark rules, census and the Verify report.
+- `scanCore`: type filters, grouping, auto-mark rules and the census behind Compare folders.
 - `scanWorker`: runs the real worker thread against temp folders.
 - `roots`: overlapping and aliased folders.
 - `deleteSafety`: the delete guard, the delete checks, and quarantine/restore on temp folders.
@@ -114,7 +112,7 @@ It creates and removes its own test folder on the share.
 │   │   ├── main.js          ← Electron main process: window, IPC, worker lifecycle
 │   │   ├── preload.js       ← Secure IPC bridge to renderer
 │   │   ├── scanWorker.js    ← Runs in worker_threads — async concurrent walk + hashing, cancellable
-│   │   ├── scanCore.js      ← Pure scan decisions: filters, groups, census, Verify report
+│   │   ├── scanCore.js      ← Pure scan decisions: filters, groups, census
 │   │   ├── roots.js         ← Overlapping / aliased scan-root checks
 │   │   ├── system.js        ← OS lookups: mapped drives, real paths
 │   │   ├── deleteGuard.js   ← Which files may be deleted (checked against the last scan)
@@ -134,9 +132,8 @@ It creates and removes its own test folder on the share.
 │       └── views/
 │           ├── HomeView.jsx           ← Mode select, folder zones, filters, exclusions, recovery entry
 │           ├── ScanView.jsx           ← Live progress (walk → hash → verify), real cancel
-│           ├── CompareView.jsx        ← Compare summary: source vs target, folder-level selection
+│           ├── CompareView.jsx        ← Compare folders: verdict, bar/boxes, sortable list panel
 │           ├── ResultsView.jsx        ← Duplicate groups, shield badges, warnings, no-survivor guard
-│           ├── VerifyResultsView.jsx  ← Backup-coverage report for Verify mode
 │           ├── RecoveryView.jsx       ← Browse + restore in-app quarantine
 │           ├── HistoryView.jsx / SettingsView.jsx
 │           └── DoneView.jsx           ← What was recycled, quarantined or left in place
@@ -171,10 +168,9 @@ The Quarantine panel shows the app's quarantine folders only — not the system 
 | File type / size filters | ✅ Photos, Audio, Video, Docs, Archives; configurable min size |
 | Drag-and-drop folders | ✅ |
 | Location picker | ✅ Home/Documents/Drives/USB/Network, cross-platform |
-| Simple mode | ✅ Find duplicates within folders |
-| Compare mode (protected vs target) | ✅ Shield badges, protected files never selectable |
-| Verify mode (backup coverage) | ✅ Missing-from-backup / backed-up / backup-only / unreadable |
-| Auto-mark rules | ✅ 4 rules incl. protected-wins |
+| Find duplicates | ✅ Any folders; Keep folders never touched |
+| Compare folders (backup check) | ✅ Verdict + Only in Original / In both / Only in Copy |
+| Auto-mark rules | ✅ Keep folders win; then newest / oldest / largest |
 | No-survivor guard | ✅ Explicit acknowledgement before erasing a group's last copy |
 | Exclusion list | ✅ Editable, pre-populated defaults |
 | Zero-byte file detection | ✅ Listed separately |

@@ -221,35 +221,42 @@ export default function CompareView({ scanResult, scanConfig, onReviewFiles, onB
   const unreadTotal = unread.sourceFiles + unread.targetFiles;
   const total = Math.max(1, census.sourceOnly.files + census.matched.targetFiles + census.targetOnly.files);
   const pct = n => `${Math.max(2, (n / total) * 100)}%`;
-  const srcName = lastSegment(src.paths[0]) || 'the source';
-  const tgtName = lastSegment(tgt.paths[0]) || 'the target';
+  const srcName = lastSegment(src.paths[0]) || 'Original';
+  const tgtName = lastSegment(tgt.paths[0]) || 'Copy';
+
+  // The verdict — the backup question, answered first. Unreadable Original
+  // files count against it: unknown is not "backed up".
+  const missing = census.sourceOnly.files;
+  const unreadOriginal = unread.sourceFiles;
+  const allThere = missing === 0 && unreadOriginal === 0;
+  const verdictHow = { thorough: 'Every file was compared byte for byte.', standard: 'Matched on size and the first 64 KB — run a Thorough scan to prove every byte.', quick: 'Matched by name and size only — this is not proof. Run a Thorough scan.' }[confidence];
 
   // ── What each tab shows ──
   const TABS = {
     sourceOnly: {
       color: 'var(--accent)', count: census.sourceOnly.files, bytes: census.sourceOnly.bytes, rows: sourceOnlyRows,
-      title: `Only in the protected source (${srcName})`,
-      desc: `Source files with no copy anywhere in the target. The target is missing these. Nothing here can be deleted by this app.`,
+      title: `Only in the Original (${srcName}) — missing from the Copy`,
+      desc: `These Original files have no copy anywhere in the Copy. If the Copy is your backup, these are not backed up. Nothing in the Original is ever changed.`,
       folders: false,
     },
     matched: {
       color: 'var(--success)', count: census.matched.targetFiles, bytes: census.matched.bytes, rows: matchedRows,
-      title: isQuick ? `In both — matched by name and size` : `In both — target files that are copies of source files`,
+      title: isQuick ? `In both — matched by name and size` : `In both — Copy files that are identical to Original files`,
       desc: isQuick
-        ? `Each file below in ${tgtName} has a file with the same name and size in the protected source (right-hand column). Quick match doesn't read contents, so every deletion is checked byte-for-byte first.`
-        : `Each file below in ${tgtName} has an identical copy in the protected source (right-hand column). These are the duplicates you can remove from the target. The source copies are never touched.`,
+        ? `Each file below in ${tgtName} has a file with the same name and size in the Original (right-hand column). Quick match doesn't read contents, so every deletion is checked byte-for-byte first.`
+        : `Each file below in ${tgtName} has an identical file in the Original (right-hand column). They're safely backed up — and, if you want the space back, they're the duplicates you can remove from the Copy.`,
       folders: true,
     },
     targetOnly: {
       color: 'var(--warning)', count: census.targetOnly.files, bytes: census.targetOnly.bytes, rows: targetOnlyRows,
-      title: `Only in the target (${tgtName})`,
-      desc: `Target files with no copy in the protected source, so they aren't backed up there. Keep these, or copy them to the source before cleaning up the target.`,
+      title: `Only in the Copy (${tgtName})`,
+      desc: `Copy files with no match in the Original — new files, edited versions, or files deleted from the Original. Keep these, or move them into the Original before cleaning up the Copy.`,
       folders: true,
     },
     unreadable: {
       color: 'var(--danger)', count: unreadTotal, bytes: null, rows: unreadableRows,
       title: `Couldn't be read`,
-      desc: `These files couldn't be opened during the scan (locked, permission denied, or removed), so they aren't counted as matched or unmatched.`,
+      desc: `These files couldn't be opened during the scan (locked, permission denied, or removed), so we can't say whether they're matched or missing.`,
       folders: false,
     },
   };
@@ -267,7 +274,7 @@ export default function CompareView({ scanResult, scanConfig, onReviewFiles, onB
     { key: 'folder', label: 'Folder', width: tab === 'matched' ? '30%' : '44%', rtl: true, muted: true, title: r => r.folder },
     { key: 'size', label: 'Size', numeric: true, width: '11%', render: r => formatSize(r.size) },
     tab === 'matched'
-      ? { key: 'sourceCopy', label: isQuick ? 'Same name in source' : 'Copy in source', width: '33%', rtl: true, muted: true, title: r => r.sourceCopy }
+      ? { key: 'sourceCopy', label: isQuick ? 'Same name in Original' : 'Same file in Original', width: '33%', rtl: true, muted: true, title: r => r.sourceCopy }
       : tab === 'unreadable'
         ? { key: 'side', label: 'Side', width: '19%' }
         : { key: 'modified', label: 'Modified', numeric: true, width: '19%', render: r => formatDate(r.modified) },
@@ -292,11 +299,11 @@ export default function CompareView({ scanResult, scanConfig, onReviewFiles, onB
     ...(selectable ? [{ key: 'select', sortable: false, width: scale(40), align: 'center',
       header: <Check scale={scale} on={allShownSelected} onToggle={toggleAllShown} label="Select all folders in this list" />,
       render: f => <Check scale={scale} on={selFolders.has(f.key)} onToggle={() => toggleFolder(f.key)} label={`Select ${f.label}`} /> }] : []),
-    { key: 'stateRank', label: 'State', width: scale(70), render: f => <span title={{ all: 'Every file is in the source', partial: 'Some files are in the source', none: 'No file is in the source' }[f.state]}><Mark scale={scale} state={f.state} /></span> },
+    { key: 'stateRank', label: 'State', width: scale(70), render: f => <span title={{ all: 'Every file is also in the Original', partial: 'Some files are also in the Original', none: 'No file is in the Original' }[f.state]}><Mark scale={scale} state={f.state} /></span> },
     { key: 'label', label: 'Folder', width: 'auto', rtl: true, title: f => (f.root ? `${f.root} › ${f.path}` : f.path) },
     { key: 'files', label: 'Files', numeric: true, width: '10%', render: f => f.files.toLocaleString() },
-    { key: 'matched', label: isQuick ? 'Name match' : 'In source', numeric: true, width: '12%', render: f => f.matched.toLocaleString() },
-    { key: 'targetOnly', label: 'Not in source', numeric: true, width: '13%', render: f => (
+    { key: 'matched', label: isQuick ? 'Name match' : 'In Original', numeric: true, width: '12%', render: f => f.matched.toLocaleString() },
+    { key: 'targetOnly', label: 'Not in Original', numeric: true, width: '14%', render: f => (
       <span style={{ color: f.targetOnly > 0 && !isQuick ? 'var(--warning)' : undefined }}>{f.targetOnly.toLocaleString()}{f.unreadable > 0 ? ` (+${f.unreadable} unreadable)` : ''}</span>) },
     { key: 'reclaimable', label: 'Frees', numeric: true, width: '11%', render: f => formatSize(f.reclaimable) },
   ];
@@ -337,54 +344,79 @@ export default function CompareView({ scanResult, scanConfig, onReviewFiles, onB
       {/* Roots */}
       <div style={s.rootRow}>
         <div style={{ maxWidth: '44%', minWidth: 0 }}>
-          <div style={{ ...s.eyebrow, color: 'var(--accent)' }}><ShieldIcon size={scale(15)} /> Protected source</div>
+          <div style={{ ...s.eyebrow, color: 'var(--accent)' }}><ShieldIcon size={scale(15)} /> Original</div>
           <div style={s.rootPath}>{src.paths[0] || ''}{src.paths.length > 1 ? ` +${src.paths.length - 1}` : ''}</div>
           <div style={s.bigNum}>{src.files.toLocaleString()}</div>
         </div>
         <div style={{ maxWidth: '44%', minWidth: 0, textAlign: 'right' }}>
-          <div style={{ ...s.eyebrow, justifyContent: 'flex-end' }}>Scan target</div>
+          <div style={{ ...s.eyebrow, justifyContent: 'flex-end' }}>Copy</div>
           <div style={{ ...s.rootPath, direction: 'rtl' }}>{tgt.paths[0] || ''}{tgt.paths.length > 1 ? ` +${tgt.paths.length - 1}` : ''}</div>
           <div style={s.bigNum}>{tgt.files.toLocaleString()}</div>
         </div>
       </div>
 
+      {/* Verdict — is everything in the Original also in the Copy? */}
+      <div role="status" style={{
+        flexShrink: 0, marginBottom: scale(16), padding: `${scale(10)}px ${scale(14)}px`, borderRadius: scale(10),
+        background: allThere ? 'color-mix(in srgb, var(--success) 10%, var(--bg-card))' : 'color-mix(in srgb, var(--warning) 12%, var(--bg-card))',
+        border: `1px solid ${allThere ? 'var(--success)' : 'var(--warning)'}`,
+        display: 'flex', alignItems: 'center', gap: scale(12), flexWrap: 'wrap',
+      }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: scale(14), fontWeight: 600, color: allThere ? 'var(--success)' : 'var(--warning)' }}>
+            {allThere
+              ? (isQuick ? 'Every Original file has a same-named file in the Copy' : '✓ Everything in the Original is also in the Copy')
+              : missing > 0
+                ? `⚠ ${missing.toLocaleString()} Original file${missing !== 1 ? 's are' : ' is'} missing from the Copy`
+                : `⚠ ${unreadOriginal.toLocaleString()} Original file${unreadOriginal !== 1 ? 's' : ''} couldn't be read, so ${unreadOriginal !== 1 ? 'they weren’t' : 'it wasn’t'} checked`}
+          </div>
+          <div style={{ fontSize: scale(12), color: 'var(--text-secondary)', marginTop: scale(2) }}>
+            {verdictHow}
+            {missing > 0 && unreadOriginal > 0 && ` ${unreadOriginal.toLocaleString()} more couldn't be read.`}
+          </div>
+        </div>
+        {missing > 0 && tab !== 'sourceOnly' && (
+          <button style={s.btn} onClick={() => pick('sourceOnly')}>Show missing files</button>
+        )}
+      </div>
+
       {/* Bar — each segment opens its list */}
       <div style={s.bar} role="group" aria-label="Choose which files to list">
-        {barSeg('sourceOnly', pct(census.sourceOnly.files), 'color-mix(in srgb, var(--accent) 26%, transparent)', null, `${census.sourceOnly.files.toLocaleString()} only in source`)}
+        {barSeg('sourceOnly', pct(census.sourceOnly.files), 'color-mix(in srgb, var(--accent) 26%, transparent)', null, `${census.sourceOnly.files.toLocaleString()} only in Original`)}
         {barSeg('matched', pct(census.matched.targetFiles), 'color-mix(in srgb, var(--success) 30%, transparent)',
           `${census.matched.targetFiles.toLocaleString()} ${isQuick ? 'name matches' : 'in both'}`, `${census.matched.targetFiles.toLocaleString()} in both`)}
-        {barSeg('targetOnly', pct(census.targetOnly.files), 'color-mix(in srgb, var(--warning) 34%, transparent)', null, `${census.targetOnly.files.toLocaleString()} only in target`, isQuick)}
+        {barSeg('targetOnly', pct(census.targetOnly.files), 'color-mix(in srgb, var(--warning) 34%, transparent)', null, `${census.targetOnly.files.toLocaleString()} only in Copy`, isQuick)}
       </div>
       <div style={s.barLbl}>
-        <span>{census.sourceOnly.files.toLocaleString()} only in source</span>
-        <span>{isQuick ? 'target-only count needs a standard scan' : `${census.targetOnly.files.toLocaleString()} only in target`}</span>
+        <span>{census.sourceOnly.files.toLocaleString()} only in Original</span>
+        <span>{isQuick ? 'Copy-only count needs a standard scan' : `${census.targetOnly.files.toLocaleString()} only in Copy`}</span>
       </div>
 
       {/* Boxes — same choice as the bar, the selected one is outlined */}
       <div style={s.tiles} role="group" aria-label="Choose which files to list">
         <Tile s={s} active={tab === 'sourceOnly'} num={census.sourceOnly.files} color="var(--accent)"
-          label="Only in source" sub={`${formatSize(census.sourceOnly.bytes)} · no copy in the target`}
+          label="Only in Original" sub={`${formatSize(census.sourceOnly.bytes)} · missing from the Copy`}
           onClick={() => pick('sourceOnly')} />
         <Tile s={s} active={tab === 'matched'} num={census.matched.targetFiles} color="var(--success)"
           label={isQuick ? 'In both (name match)' : 'In both'}
-          sub={`${formatSize(census.matched.bytes)} · target copies of source files`}
+          sub={`${formatSize(census.matched.bytes)} · Copy files matching the Original`}
           onClick={() => pick('matched')} />
         <Tile s={s} active={tab === 'targetOnly'} num={census.targetOnly.files} color="var(--warning)"
-          label="Only in target" sub={isQuick ? 'needs a standard scan' : `${formatSize(census.targetOnly.bytes)} · not in the source`}
+          label="Only in Copy" sub={isQuick ? 'needs a standard scan' : `${formatSize(census.targetOnly.bytes)} · not in the Original`}
           disabled={isQuick} onClick={() => pick('targetOnly')} />
       </div>
 
       {isQuick && (
         <div style={s.note}>
-          Quick match compares file names and sizes only. A renamed copy looks like a file that isn't backed up,
-          and a same-named file with different contents looks like a match. Every deletion is still checked
-          byte-for-byte first, but run a standard scan before trusting these numbers.
+          Quick match compares file names and sizes only. A renamed copy looks like a missing file, and a
+          same-named file with different contents looks like a match. Every deletion is still checked
+          byte-for-byte first, but run a Thorough scan before trusting these numbers.
         </div>
       )}
       {unreadTotal > 0 && (
         <div style={{ ...s.note, color: 'var(--warning)' }}>
           {unreadTotal.toLocaleString()} file{unreadTotal !== 1 ? 's' : ''} couldn't be read
-          ({unread.sourceFiles.toLocaleString()} in source, {unread.targetFiles.toLocaleString()} in target) and {unreadTotal !== 1 ? 'are' : 'is'} not
+          ({unread.sourceFiles.toLocaleString()} in Original, {unread.targetFiles.toLocaleString()} in Copy) and {unreadTotal !== 1 ? 'are' : 'is'} not
           counted as matched or unmatched.{' '}
           <button onClick={() => pick('unreadable')} aria-pressed={tab === 'unreadable'}
             style={{ background: 'none', border: 'none', padding: 0, color: 'var(--accent)', font: 'inherit', cursor: 'pointer', textDecoration: tab === 'unreadable' ? 'underline' : 'none' }}>
@@ -416,8 +448,8 @@ export default function CompareView({ scanResult, scanConfig, onReviewFiles, onB
         <div style={s.scroll}>
           {rows.length === 0 ? (
             <div style={{ padding: scale(24), color: 'var(--text-secondary)', fontSize: scale(13) }}>
-              {tab === 'targetOnly' ? 'Nothing here — every target file exists in the protected source.'
-                : tab === 'sourceOnly' ? 'Nothing here — every source file has a copy in the target.'
+              {tab === 'targetOnly' ? 'Nothing here — every Copy file also exists in the Original.'
+                : tab === 'sourceOnly' ? 'Nothing here — every Original file has a copy in the Copy.'
                 : 'Nothing here.'}
             </div>
           ) : showFolders ? (
@@ -432,10 +464,10 @@ export default function CompareView({ scanResult, scanConfig, onReviewFiles, onB
         <div style={s.foot}>
           {showFolders ? (
             <span style={{ flex: 1 }}>
-              {folderList.length.toLocaleString()} of {folders.length.toLocaleString()} target folders
+              {folderList.length.toLocaleString()} of {folders.length.toLocaleString()} Copy folders
               · {folderList.reduce((a, f) => a + f.files, 0).toLocaleString()} files
-              · <span style={{ color: 'var(--success)' }}>{folderList.reduce((a, f) => a + f.matched, 0).toLocaleString()} {isQuick ? 'name-matched' : 'in source'}</span>
-              {!isQuick && <> · <span style={{ color: 'var(--warning)' }}>{folderList.reduce((a, f) => a + f.targetOnly, 0).toLocaleString()} not in source</span></>}
+              · <span style={{ color: 'var(--success)' }}>{folderList.reduce((a, f) => a + f.matched, 0).toLocaleString()} {isQuick ? 'name-matched' : 'in Original'}</span>
+              {!isQuick && <> · <span style={{ color: 'var(--warning)' }}>{folderList.reduce((a, f) => a + f.targetOnly, 0).toLocaleString()} not in Original</span></>}
             </span>
           ) : (
             <span style={{ flex: 1 }}>

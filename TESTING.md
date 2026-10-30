@@ -2,7 +2,7 @@
 
 A hands-on pass over everything changed in Phases A–D, using your own files. Allow about an hour. Work through it in order, and note anything that looks wrong, reads confusingly or feels slow. Odd wording counts too.
 
-**Safety first:** run every delete test against **copies**. Nothing is ever permanently deleted: files go to the Recycle Bin or to a `.dff-quarantine` folder on the same drive. Still, keep the real originals out of the "Scan target" box until you trust the app.
+**Safety first:** run every delete test against **copies**. Nothing is ever permanently deleted: files go to the Recycle Bin or to a `.dff-quarantine` folder on the same drive. Still, keep real originals in **Keep** folders (Find duplicates) or the **Original** box (Compare folders) until you trust the app.
 
 ---
 
@@ -27,49 +27,49 @@ Write down what you changed; the tests below check that the app finds it.
 
 ---
 
-## 1. Verify: is everything backed up?
+## 1. Home: two jobs
 
-1. Home → **Verify backup**. Source = `D:\dff-real\originals`, Backup = `Z:\dff-real\backup`.
-2. Open **Scan options**. Match confidence should default to **Thorough**, marked Recommended. Start the scan.
+- [ ] Home offers exactly two choices: **Find duplicates** and **Compare folders**.
+- [ ] In Find duplicates, each folder row has a **Keep** switch. A kept folder shows a shield and tinted row.
+- [ ] Marking every folder Keep disables the start button and explains why.
+
+## 2. Compare folders: is everything backed up?
+
+1. Home → **Compare folders**. Original = `D:\dff-real\originals`, Copy = `Z:\dff-real\backup`.
+2. Open **Scan options**. Match confidence should default to **Thorough**, marked Recommended. Click **Compare**.
 
 **Expect:**
-- [ ] The headline says **"⚠ 4 source files are not in the backup"**: the 3 deleted plus the edited one, since its contents changed.
-- [ ] **Missing from the backup** lists exactly those 4 files, RAW files included.
-- [ ] The **renamed** file counts as backed up (same contents, different name).
-- [ ] **Only in the backup** shows your added file (and the edited version).
-- [ ] The sentence under the title names the right two folders.
+- [ ] The verdict at the top says **"⚠ 4 Original files are missing from the Copy"**: the 3 deleted plus the edited one, since its contents changed.
+- [ ] **Show missing files** (or the **Only in Original** box) lists exactly those 4, RAW files included.
+- [ ] The **renamed** file appears under **In both**, next to its "Same file in Original".
+- [ ] **Only in Copy** shows your added file (and the edited version).
+- [ ] The bar segments and boxes switch the list. The chosen one is highlighted, and the list title says what you're looking at.
+- [ ] Column headers sort the list, and the footer stays visible while you scroll.
+- [ ] **By folder** shows the folder table. Tick a folder, then **Review N selected**, and Results opens with only those files ticked. **Back to Compare** returns to the same list.
 
 Note how long the scan took: ______
 
-## 2. Verify, Standard match
+## 3. Compare folders, Standard and Quick match
 
-Repeat test 1 with **Scan options → Standard**.
+Repeat test 2 with **Scan options → Standard**, then with **Quick**.
 
-- [ ] The card says **"Likely backed up"**, not "Backed up".
-- [ ] A note explains that only the first 64 KB were compared.
+- [ ] Standard: the verdict notes that only the first 64 KB were compared.
+- [ ] Quick: the wording changes to name/size matches, **Only in Copy** is greyed out, and a note explains why.
 
-## 3. Compare, Standard match
+## 4. Find duplicates with a Keep folder
 
-1. Home → **Compare locations**. Protected source = `D:\dff-real\originals`, Scan target = `Z:\dff-real\backup`.
+1. Home → **Find duplicates**. Add `D:\dff-real\originals` and mark it **Keep**. Add `Z:\dff-real\backup` (not Keep).
+2. Click **Find duplicates**.
 
 **Expect:**
-- [ ] The bar and tiles (**Only in source / Duplicates in target / Only in target**) match your changes and add up to the totals at the top.
-- [ ] **Folders in the target**: partly matched folders show "X of Y in source", plus how many are not in source and the space you'd free.
-- [ ] Tick one folder, then **Review N selected files**. Results opens scoped to that folder, with **only** its matched files ticked.
-- [ ] In that scoped view, **Auto-select duplicates** doesn't tick files in other folders.
-- [ ] No file from `originals` can ever be ticked; it shows a shield instead.
-
-## 4. Compare, Quick match
-
-Repeat test 3 with **Scan options → Quick**.
-
-- [ ] The wording changes to **"name matches"** and "with a same-name match".
-- [ ] The **Only in target** tile is greyed out with "needs a standard scan".
-- [ ] A note explains that Quick only compares names and sizes.
+- [ ] Results opens straight away, with no Compare summary.
+- [ ] Files in the Keep folder show a shield ("Keep folder") and can't be ticked.
+- [ ] The copies in the backup are pre-ticked.
+- [ ] Without any Keep folder, the newest copy in each group is kept by default; change this under Scan options.
 
 ## 5. Delete from the NAS, then restore
 
-1. From test 3's results, select about 10 files in the **target** (`Z:`), then **Delete**.
+1. From test 4's results, select about 10 files on `Z:`, then **Delete**.
 
 **Expect:**
 - [ ] The Done screen says the files went to a **.dff-quarantine folder on the same drive** (network drives have no Recycle Bin).
@@ -79,7 +79,7 @@ Repeat test 3 with **Scan options → Quick**.
 
 ## 6. Stop a delete part-way
 
-1. Run a Simple scan on a folder with a few hundred duplicates (copies!). Select all, then **Delete**.
+1. **Find duplicates** on a folder with a few hundred duplicates (copies!). Select all, then **Delete**.
 2. Within a couple of seconds, click **Stop deleting**.
 
 **Expect:**
@@ -89,13 +89,13 @@ Repeat test 3 with **Scan options → Quick**.
 
 ## 7. Safety refusals
 
-- [ ] Protected source = `Z:\dff-real\backup`, Scan target = `Z:\dff-real` (the target contains the protected folder). The scan **runs**, and nothing under `backup` is deletable.
-- [ ] Swap them (the target is inside the protected folder). The scan is **refused** with a red message on Home.
-- [ ] Protected source = `\\192.168.0.101\public\dff-real`, Scan target = `Z:\dff-real` (the same folder through two paths). The scan is **refused**.
+- [ ] Find duplicates: `Z:\dff-real` plus `Z:\dff-real\backup` marked **Keep** (the Keep folder is inside the other). The scan **runs**, and nothing under `backup` is deletable.
+- [ ] Swap which one is Keep. The scan is **refused** with a red message explaining why.
+- [ ] Compare folders: Original = `\\192.168.0.101\public\dff-real`, Copy = `Z:\dff-real` (the same folder through two paths). The scan is **refused**.
 
 ## 8. Big scan, responsiveness
 
-Run a **Simple scan** on a large folder, such as your whole photo library (scanning only reads files).
+Run **Find duplicates** on a large folder, such as your whole photo library (scanning only reads files).
 
 - [ ] The window stays responsive during the scan, and you can switch sidebar sections and come back.
 - [ ] Results start **collapsed** when there are many groups, and show **"Show 200 more…"** at the bottom.
@@ -115,7 +115,7 @@ Note how many files were scanned and how long it took: ______
 - [ ] The Home options summary shows the exclusion count.
 - [ ] A folder you own named `Windows` (say `D:\dff-real\Windows`) **is** scanned; only `C:\Windows` is skipped.
 - [ ] **Settings → Scan cache** shows "N files remembered" after a scan. **Clear** empties it.
-- [ ] Scan options (types, size, confidence) are remembered after a restart, and Verify keeps its own confidence setting.
+- [ ] Scan options (types, size, confidence) are remembered after a restart, and Compare folders keeps its own confidence setting.
 
 ## 11. Odds and ends
 

@@ -6,13 +6,12 @@ import HomeView from './views/HomeView.jsx';
 import ScanView from './views/ScanView.jsx';
 import ResultsView from './views/ResultsView.jsx';
 import CompareView from './views/CompareView.jsx';
-import VerifyResultsView from './views/VerifyResultsView.jsx';
 import DoneView from './views/DoneView.jsx';
 import RecoveryView from './views/RecoveryView.jsx';
 import HistoryView from './views/HistoryView.jsx';
 import SettingsView from './views/SettingsView.jsx';
 import { initTheme } from './utils/theme.js';
-import { loadHistory, addHistoryEntry, updateHistoryEntry, removeHistoryEntry, clearHistory, entryTitle, entrySubtitle } from './utils/scanHistory.js';
+import { loadHistory, addHistoryEntry, updateHistoryEntry, removeHistoryEntry, clearHistory, entryTitle, entrySubtitle, jobOf } from './utils/scanHistory.js';
 
 const api = window.electronAPI;
 
@@ -69,7 +68,7 @@ export default function App() {
     if (historyIdRef.current) setHistory(updateHistoryEntry(historyIdRef.current, result));
     // Only yank the user to results if they're actually watching the scan
     if (viewRef.current === 'scanning') {
-      setView(result.mode === 'verify' && !result.error ? 'verify' : 'results');
+      setView('results');
     }
   }, []);
 
@@ -206,15 +205,19 @@ export default function App() {
     setShowAllFiles(false);
     setFileSelection(null);
     setSelectionLabel(null);
-    setView(scan.result?.mode === 'verify' && !scan.result?.error ? 'verify' : 'results');
+    setView('results');
   }, [scan]);
 
   // ── Derived display state ───────────────────────────────────────────────────
+  // Compare folders shows the two-sided summary first; Find duplicates (and a
+  // failed scan) goes straight to the duplicate groups.
+  const isCompareJob = !!scan && jobOf(scan.config || {}) === 'compare';
+  const showCompare = isCompareJob && !!scan.result && !!scan.result.census && !scan.result.error && !showAllFiles;
   const inScanFlow = view !== 'home';
   const title = inScanFlow
     ? (view === 'results'
-        ? (scan?.result?.census && !showAllFiles ? 'Compare' : 'Duplicate files')
-        : { scanning: 'Scanning\u2026', verify: 'Verify results', done: 'Done' }[view])
+        ? (showCompare ? 'Compare folders' : 'Duplicate files')
+        : { scanning: 'Scanning\u2026', done: 'Done' }[view])
     : SECTION_TITLES[section];
 
   const scanActivity = scan ? (
@@ -278,21 +281,18 @@ export default function App() {
               onCancel={handleCancelScan}
             />
           )}
-          {view === 'results' && scan?.result && scan.result.census && !showAllFiles && (
+          {view === 'results' && showCompare && (
             <CompareView scanResult={scan.result} scanConfig={scan.config}
               ui={compareUi} onUi={setCompareUi}
               onReviewFiles={(paths, label) => { setFileSelection(paths || null); setSelectionLabel(label || null); setShowAllFiles(true); }} onBack={handleReset} />
           )}
-          {view === 'results' && scan?.result && (!scan.result.census || showAllFiles) && (
+          {view === 'results' && scan?.result && !showCompare && (
             <ResultsView scanResult={scan.result} scanConfig={scan.config}
               onDeleteComplete={handleDeleteComplete}
               selection={fileSelection}
               selectionLabel={selectionLabel}
-              backLabel={scan.result.census ? 'Compare' : null}
-              onBack={scan.result.census ? () => { setShowAllFiles(false); setFileSelection(null); setSelectionLabel(null); } : handleReset} />
-          )}
-          {view === 'verify' && scan?.result && (
-            <VerifyResultsView scanResult={scan.result} scanConfig={scan.config} onBack={handleReset} />
+              backLabel={isCompareJob ? 'Compare' : null}
+              onBack={isCompareJob ? () => { setShowAllFiles(false); setFileSelection(null); setSelectionLabel(null); } : handleReset} />
           )}
           {view === 'done' && (
             <DoneView deleteResult={deleteResult} onScanAgain={handleReset} />
