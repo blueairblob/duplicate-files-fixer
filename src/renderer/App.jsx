@@ -32,6 +32,7 @@ export default function App() {
   const [view, setView] = useState('home');           // what is displayed
   const [showAllFiles, setShowAllFiles] = useState(false); // Compare summary -> full file list
   const [fileSelection, setFileSelection] = useState(null); // paths chosen by folder on Compare
+  const [compareUi, setCompareUi] = useState(null);         // Compare tab/sort/selection, kept across Results trips
   const [selectionLabel, setSelectionLabel] = useState(null); // what the drill-down is scoped to
   const [section, setSection] = useState('scan');     // which sidebar page when view === 'home'
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -95,6 +96,7 @@ export default function App() {
     setShowAllFiles(false);
     setFileSelection(null);
     setSelectionLabel(null);
+    setCompareUi(null);
     setView('scanning');
     setSection('scan');
 
@@ -164,6 +166,7 @@ export default function App() {
   }, [refreshQuarantineCount]);
 
   const handleReset = useCallback(() => {
+    setCompareUi(null);
     setShowAllFiles(false);
     setFileSelection(null);
     setSelectionLabel(null);
@@ -277,6 +280,7 @@ export default function App() {
           )}
           {view === 'results' && scan?.result && scan.result.census && !showAllFiles && (
             <CompareView scanResult={scan.result} scanConfig={scan.config}
+              ui={compareUi} onUi={setCompareUi}
               onReviewFiles={(paths, label) => { setFileSelection(paths || null); setSelectionLabel(label || null); setShowAllFiles(true); }} onBack={handleReset} />
           )}
           {view === 'results' && scan?.result && (!scan.result.census || showAllFiles) && (
