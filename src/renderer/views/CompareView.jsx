@@ -1,7 +1,8 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useDPR } from '../contexts/DPRContext.jsx';
 import { ShieldIcon, CheckCircleIcon, HalfCircleIcon, ChevronRightIcon } from '../components/icons.jsx';
-import { sortRows, nextSort } from '../utils/sortRows.js';
+import { sortRows } from '../utils/sortRows.js';
+import SortableTable from '../components/SortableTable.jsx';
 
 function formatSize(bytes) {
   if (!bytes || bytes === 0) return '0 B';
@@ -15,7 +16,6 @@ function formatDate(iso) {
 }
 
 const CONFIDENCE_LABELS = { quick: 'Quick match', standard: 'Standard match', thorough: 'Thorough match' };
-const PAGE = 500;            // rows rendered per "show more"
 const WORKER_LIST_CAP = 5000; // the scan keeps at most this many paths per census list
 
 function lastSegment(p) {
@@ -108,64 +108,6 @@ function Tile({ num, color, label, sub, onClick, disabled, active, s }) {
       <div style={s.tileLbl}>{label}</div>
       <div style={s.tileSub}>{sub}</div>
     </button>
-  );
-}
-
-// Sortable table with a sticky header, rendered PAGE rows at a time.
-// `resetKey` changes when the list or its sort changes, and starts paging over.
-function SortableTable({ columns, rows, sort, onSort, rowKey, caption, resetKey, s, scale }) {
-  const [limit, setLimit] = useState(PAGE);
-  useEffect(() => { setLimit(PAGE); }, [resetKey]);
-  const shown = rows.slice(0, limit);
-  return (
-    <table style={s.table}>
-      <caption style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0 0 0 0)' }}>{caption}</caption>
-      <colgroup>{columns.map(c => <col key={c.key} style={{ width: c.width }} />)}</colgroup>
-      <thead>
-        <tr>
-          {columns.map(c => {
-            const active = sort && sort.key === c.key;
-            const ariaSort = active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none';
-            return (
-              <th key={c.key} scope="col" aria-sort={c.sortable === false ? undefined : ariaSort} style={{ ...s.th, textAlign: c.numeric ? 'right' : 'left' }}>
-                {c.sortable === false
-                  ? <span style={{ ...s.thBtn, cursor: 'default', justifyContent: c.align === 'center' ? 'center' : undefined }}>{c.header ?? c.label}</span>
-                  : (
-                    <button style={{ ...s.thBtn, justifyContent: c.numeric ? 'flex-end' : 'flex-start', color: active ? 'var(--text-primary)' : 'inherit' }}
-                      onClick={() => onSort(nextSort(sort, c.key, !!c.numeric))}>
-                      {c.label}
-                      <span aria-hidden style={{ fontSize: scale(10), opacity: active ? 1 : 0.35 }}>
-                        {active ? (sort.dir === 'asc' ? '▲' : '▼') : '↕'}
-                      </span>
-                    </button>
-                  )}
-              </th>
-            );
-          })}
-        </tr>
-      </thead>
-      <tbody>
-        {shown.map(r => (
-          <tr key={rowKey(r)}>
-            {columns.map(c => (
-              <td key={c.key} title={c.title ? c.title(r) : undefined}
-                style={{ ...s.td, ...(c.rtl ? s.rtl : null), textAlign: c.numeric ? 'right' : c.align || (c.rtl ? 'left' : undefined), color: c.muted ? 'var(--text-secondary)' : undefined }}>
-                {c.render ? c.render(r) : r[c.key]}
-              </td>
-            ))}
-          </tr>
-        ))}
-        {rows.length > shown.length && (
-          <tr>
-            <td colSpan={columns.length} style={{ ...s.td, textAlign: 'center', borderBottom: 'none' }}>
-              <button style={s.btn} onClick={() => setLimit(l => l + PAGE)}>
-                Show {Math.min(PAGE, rows.length - shown.length).toLocaleString()} more of {(rows.length - shown.length).toLocaleString()}
-              </button>
-            </td>
-          </tr>
-        )}
-      </tbody>
-    </table>
   );
 }
 

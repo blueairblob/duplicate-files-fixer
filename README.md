@@ -1,12 +1,20 @@
-# Holdfast — Desktop Prototype
+# Holdfast
+
+Keep your files safe while they're at rest and while they move: from a phone or device, to a local copy, to your NAS.
+
 
 A working Electron + React prototype covering the core features from the PRD (see `PLAN.md`).
 
 - Folder selection (browse, location picker, or drag-and-drop)
 - File type and size filters — with no type picked, **every** file is scanned (RAW photos, TIFFs, anything)
-- **Two jobs, nothing else to learn:**
+- **Three jobs, in the order a backup happens:**
+  - **Move to backup**: you've copied an iPhone/Android (or SD card, camera, Downloads) to a local folder and want it on the NAS.
+    - Holdfast compares the local copy against your **whole** backup by content, and copies only what isn't there (re-imports like `IMG_1234 (1).HEIC` are skipped).
+    - Files go into `Year/Month` folders, or keep their original folders.
+    - Each copy is written to a temporary name, compared byte for byte, then renamed into place with its original date. Nothing is ever overwritten.
+    - Then, if you choose, it frees up the local copies that are verified safe in the backup. They go to the Recycle Bin.
   - **Find duplicates**: search one or more folders. Mark any folder **Keep** and it's compared against but never touched; its copies elsewhere are selected for removal. This is the "reference folder" idea from dupeGuru, Duplicate Cleaner and Czkawka.
-  - **Compare folders**: an **Original** against a **Copy**, such as a backup. You get a verdict ("✓ Everything in the Original is also in the Copy", or "⚠ 12 files are missing") and three lists: *Only in Original* (missing from the Copy), *In both*, and *Only in Copy*. Copies in "In both" can be reviewed and removed from the Copy side. Defaults to a Thorough (byte-for-byte) scan.
+  - **Check a backup**: an **Original** against a **Copy**, such as a backup. You get a verdict ("✓ Everything in the Original is also in the Copy", or "⚠ 12 files are missing") and three lists: *Only in Original* (missing from the Copy), *In both*, and *Only in Copy*. Copies in "In both" can be reviewed and removed from the Copy side. Defaults to a Thorough (byte-for-byte) scan.
 - **Compare screen**: the colour bar and boxes pick the list. Each list sits in its own scrolling panel with sortable columns, a pinned footer, and a Files / By folder switch.
 - **Folder-level decisions** — folders that are fully duplicated collapse into a single row you can select in one click; folders that are only *partly* duplicated are surfaced first, because that's where judgement is actually needed. Selecting a partial folder marks only its duplicated files, never the ones that exist nowhere else.
 - **Match confidence** — choose how hard the scan works:

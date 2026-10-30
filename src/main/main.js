@@ -21,7 +21,9 @@ const os = require('os');
 const { DEFAULT_EXCLUSIONS } = require('./exclusions');
 const { buildSession } = require('./deleteGuard');
 const { checkRoots } = require('./system');
-const { createDeleteService } = require('./deleteService');
+const { createDeleteService, hashFull } = require('./deleteService');
+const { executeCopy } = require('./copyFiles');
+const { normaliseRoot, isInside } = require('./roots');
 const { getLocations } = require('./locations');
 const { makeAppUrlCheck, hardenWebContents, denyAllPermissions } = require('./security');
 const { migrateUserData } = require('./migrate');
@@ -70,6 +72,7 @@ app.on('web-contents-created', (_event, contents) => hardenWebContents(contents,
 let activeWorker = null;
 let finishActiveScan = null; // resolves the in-flight scan:start promise
 let lastSession = null; // deleteGuard session from the last completed scan
+let lastMove = null;    // Move to backup: plan, and what has been copied + verified
 let exclusionList = null; // loaded from userData on first use; see loadExclusions()
 
 function createWindow() {
@@ -174,12 +177,18 @@ async function runSmoke() {
     tgt: path.join(dir, 'tgt'),
     srcA: path.join(dir, 'src', 'a.jpg'),
     tgtCopy: path.join(dir, 'tgt', 'a copy.jpg'),
+    phone: path.join(dir, 'phone'),
+    backup: path.join(dir, 'backup'),
   };
   try {
     fs.mkdirSync(P.src); fs.mkdirSync(P.tgt);
     fs.writeFileSync(P.srcA, 'same bytes');
     fs.writeFileSync(P.tgtCopy, 'same bytes');
     fs.writeFileSync(path.join(P.tgt, 'b.jpg'), 'different');
+    fs.mkdirSync(P.phone); fs.mkdirSync(P.backup);
+    fs.writeFileSync(path.join(P.phone, 'new.jpg'), 'only on the phone');
+    fs.writeFileSync(path.join(P.phone, 'dup.jpg'), 'already backed up');
+    fs.writeFileSync(path.join(P.backup, 'old.jpg'), 'already backed up');
 
     report.ipc = await win.webContents.executeJavaScript(`(async () => {
       const P = ${JSON.stringify(P)};
@@ -200,9 +209,19 @@ async function runSmoke() {
       out.restored = entry ? (await api.restoreFromQuarantine(entry.quarantinePath)).success === true : false;
       const ex = await api.getExclusions();
       out.exclusions = Array.isArray(ex) && ex.length > 0;
+
+      // Move to backup: scan, copy the new file, free up both local copies.
+      const mv = await api.startScan({ job: 'move', mode: 'compare', protectedFolders: [P.backup], targetFolders: [P.phone], filters: {}, confidence: 'thorough' });
+      out.movePlan = mv.move && mv.move.newFiles.length === 1 && mv.move.inBackup.length === 1;
+      const cp = await api.moveCopy({ layout: 'folders' });
+      out.moveCopied = cp.copied.length === 1 && cp.failed.length === 0;
+      const sum = await api.moveFreeUpSummary();
+      const fr = await api.moveFreeUp();
+      out.moveFreed = sum.files === 2 && fr.deleted.length === 2;
       return out;
     })()`).catch(e => ({ error: e.message }));
     report.ipc.filesBack = fs.existsSync(P.srcA) && fs.existsSync(P.tgtCopy);
+    report.ipc.moveLanded = fs.existsSync(path.join(P.backup, 'phone', 'new.jpg')) && !fs.existsSync(path.join(P.phone, 'new.jpg'));
     report.scan = { groups: report.ipc.groups };
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -210,7 +229,8 @@ async function runSmoke() {
 
   const ipc = report.ipc || {};
   const ipcOk = ipc.overlapBlocked && ipc.groups === 1 && ipc.census && ipc.protectedRefused
-    && ipc.quarantined && ipc.listed && ipc.restored && ipc.exclusions && ipc.filesBack;
+    && ipc.quarantined && ipc.listed && ipc.restored && ipc.exclusions && ipc.filesBack
+    && ipc.movePlan && ipc.moveCopied && ipc.moveFreed && ipc.moveLanded;
   const ok = !!(report.page && report.page.rendered && report.page.bridge && report.page.nodeHidden
     && (isDev || report.page.csp) && ipcOk && report.errors.length === 0);
   console.log('[smoke] ' + JSON.stringify(report));
@@ -285,6 +305,7 @@ handle('scan:start', async (event, opts) => {
   // Enforced here as well as in the UI: overlapping or aliased roots can make
   // a protected file look like a deletable target copy.
   lastSession = null; // a new scan supersedes the old results
+  lastMove = null;
   const roots = await checkRoots(opts);
   if (roots.blocked.length > 0) {
     const reason = roots.blocked[0].reason;
@@ -315,6 +336,7 @@ handle('scan:start', async (event, opts) => {
         autoMarkRule: opts.autoMarkRule,
         exclusions,
         includeEmpty: !!opts.includeEmpty,
+        job: opts.job,
         confidence: opts.confidence, // quick | standard | thorough (worker defaults standard)
         concurrency: opts.concurrency, // undefined → worker defaults to 32
         platform: process.platform,
@@ -331,6 +353,9 @@ handle('scan:start', async (event, opts) => {
       } else if (msg.type === 'done') {
         activeWorker = null;
         lastSession = buildSession(msg.result, opts, process.platform);
+        lastMove = opts.job === 'move' && msg.result.move
+          ? { toRoot: (opts.protectedFolders || [])[0], fromRoots: opts.targetFolders || [], plan: msg.result.move, copied: [], cleared: new Set() }
+          : null;
         resolve(msg.result);
       } else if (msg.type === 'cancelled') {
         activeWorker = null;
@@ -386,6 +411,69 @@ function getDeleteService() {
 }
 
 handle('files:cancelDelete', async () => { getDeleteService().cancel(); return true; });
+
+// ── IPC: Move to backup ──────────────────────────────────────────────────────
+// Copy the scan's new files into the backup (verified), then optionally clear
+// the local copies that are verified there. The renderer only picks the
+// layout and confirms; the file lists come from the main process's own plan.
+let moveCancel = false;
+handle('move:cancel', async () => { moveCancel = true; getDeleteService().cancel(); return true; });
+
+handle('move:copy', async (event, { layout } = {}) => {
+  if (!lastMove || !lastMove.toRoot) throw new Error('Scan results are out of date — run the scan again');
+  moveCancel = false;
+  const win = BrowserWindow.fromWebContents(event.sender);
+  const already = new Set(lastMove.copied.map(c => c.local));
+  const files = lastMove.plan.newFiles.filter(f => !already.has(f.path));
+  const results = await executeCopy(files, { toRoot: lastMove.toRoot, layout: layout === 'folders' ? 'folders' : 'date' }, {
+    exists: async (p) => { try { await fs.promises.access(p); return true; } catch { return false; } },
+    mkdir: (d) => fs.promises.mkdir(d, { recursive: true }),
+    copyFile: (a, b) => fs.promises.copyFile(a, b, fs.constants.COPYFILE_EXCL),
+    hash: hashFull,
+    rename: (a, b) => fs.promises.rename(a, b),
+    remove: (p) => fs.promises.rm(p, { force: true }),
+    setTimes: (p, iso) => fs.promises.utimes(p, new Date(iso), new Date(iso)),
+    isCancelled: () => moveCancel,
+    onProgress: (p) => win?.webContents.send('move:progress', { phase: 'copy', ...p }),
+  });
+  lastMove.copied.push(...results.copied);
+  return results;
+});
+
+// Local files that are verified to exist in the backup: the ones just copied,
+// plus the ones the scan found already there. Each must sit under a From
+// folder and not inside the backup; executeDeletion re-hashes both copies.
+function freeUpItems() {
+  if (!lastMove) return [];
+  const p = process.platform;
+  const toRoot = normaliseRoot(lastMove.toRoot, p);
+  const fromRoots = lastMove.fromRoots.map(r => normaliseRoot(r, p));
+  const under = (file, root) => { const n = normaliseRoot(file, p); return n === root || isInside(n, root); };
+  const ok = (local) => !lastMove.cleared.has(local) && fromRoots.some(r => under(local, r)) && !under(local, toRoot);
+  const byPath = new Map(lastMove.plan.newFiles.map(f => [f.path, f]));
+  const items = [];
+  for (const c of lastMove.copied) {
+    const f = byPath.get(c.local);
+    if (f && ok(c.local)) items.push({ path: c.local, file: f, counterpart: c.backup, counterpartFile: null });
+  }
+  for (const x of lastMove.plan.inBackup) {
+    if (ok(x.file.path)) items.push({ path: x.file.path, file: x.file, counterpart: x.backup, counterpartFile: null });
+  }
+  return items;
+}
+
+handle('move:freeUpSummary', async () => {
+  const items = freeUpItems();
+  return { files: items.length, bytes: items.reduce((a, i) => a + (i.file.size || 0), 0) };
+});
+
+handle('move:freeUp', async (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  const results = await getDeleteService().deleteVerifiedCopies(freeUpItems(),
+    (p) => win?.webContents.send('move:progress', { phase: 'free', ...p }));
+  for (const pth of results.deleted) lastMove && lastMove.cleared.add(pth);
+  return results;
+});
 
 handle('files:delete', async (event, payload) => {
   const win = BrowserWindow.fromWebContents(event.sender);

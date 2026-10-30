@@ -18,6 +18,7 @@ export default function ScanView({ scanConfig, progress, startedAt, cancelling, 
   const { scale } = useDPR();
   const { mode, job, protectedFolders = [], targetFolders = [], filters = {}, autoMarkRule, includeEmpty } = scanConfig || {};
   const isCompareJob = job ? job === 'compare' : mode === 'compare';
+  const isMoveJob = job === 'move';
 
   const { scanned = 0, phase = 'walking', total = 0, currentPath = '' } = progress || {};
 
@@ -171,10 +172,10 @@ export default function ScanView({ scanConfig, progress, startedAt, cancelling, 
           width: '100%', display: 'flex', flexDirection: 'column', gap: scale(10),
         }}>
           {mode === 'compare' && protectedFolders.length > 0 && (
-            <FolderGroup label={isCompareJob ? 'Original' : 'Keep'} Icon={ShieldIcon} color="var(--accent)" folders={protectedFolders} scale={scale} />
+            <FolderGroup label={isMoveJob ? 'Backup' : isCompareJob ? 'Original' : 'Keep'} Icon={ShieldIcon} color="var(--accent)" folders={protectedFolders} scale={scale} />
           )}
           <FolderGroup
-            label={isCompareJob ? 'Copy' : 'Searching'}
+            label={isMoveJob ? 'From' : isCompareJob ? 'Copy' : 'Searching'}
             Icon={isCompareJob ? TargetIcon : SearchIcon}
             color="var(--accent)"
             folders={targetFolders} scale={scale}

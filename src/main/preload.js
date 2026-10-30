@@ -14,6 +14,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   deleteFiles:      (req)    => ipcRenderer.invoke('files:delete', req),
   cancelDelete:     ()       => ipcRenderer.invoke('files:cancelDelete'),
+
+  moveCopy:         (opts)   => ipcRenderer.invoke('move:copy', opts),
+  moveCancel:       ()       => ipcRenderer.invoke('move:cancel'),
+  moveFreeUpSummary: ()      => ipcRenderer.invoke('move:freeUpSummary'),
+  moveFreeUp:       ()       => ipcRenderer.invoke('move:freeUp'),
+  onMoveProgress:   (cb)     => ipcRenderer.on('move:progress', (_, data) => cb(data)),
+  removeMoveProgress: ()     => ipcRenderer.removeAllListeners('move:progress'),
   onDeleteProgress: (cb)     => ipcRenderer.on('files:deleteProgress', (_, data) => cb(data)),
   removeDeleteProgress: ()   => ipcRenderer.removeAllListeners('files:deleteProgress'),
   getQuarantineManifest: ()  => ipcRenderer.invoke('files:getQuarantineManifest'),

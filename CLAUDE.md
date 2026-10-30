@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Electron + React (Vite) desktop app that finds and safely deletes duplicate files, with a focus on NAS/SMB backup workflows. Plain JavaScript/JSX, no TypeScript, no linter configured. `README.md` documents features; `PLAN.md` holds the sprint roadmap.
+**Holdfast**: an Electron + React (Vite) desktop app for keeping files safe at rest and in transit (phone/device copy → local → NAS). It moves new files into a backup with verification, checks backups, and finds and safely deletes duplicates. Plain JavaScript/JSX, no TypeScript, no linter configured. `README.md` documents features; `PLAN.md` holds the sprint roadmap.
 
 ## Commands
 
@@ -44,9 +44,13 @@ Three process layers:
 ### Key cross-file behaviors
 
 - **Scan lifecycle lives in `App.jsx`, not `ScanView`.** The user can navigate away mid-scan; `ScanView` only renders `scan.progress`. `runIdRef` invalidates stale completions after cancel/re-scan. View routing is a `view` state machine (`home` | `scanning` | `results` | `verify` | `done`) plus a sidebar `section` when on home.
-- **Two user-facing jobs** (`config.job`, see `jobOf` in `utils/scanHistory.js`; old history entries map `simple`→find, `compare`/`verify`→compare):
+- **Three user-facing jobs** (`config.job`, see `jobOf` in `utils/scanHistory.js`; old history entries map `simple`→find, `compare`/`verify`→compare):
+  - **Move to backup** (`move`): From (local device copy, targetFolders) → To (one backup folder, protectedFolders), engine `compare`, always Thorough.
+    - The worker adds `result.move` (`movePlan.buildMovePlan`: newFiles / inBackup / unreadable), and main keeps `lastMove`.
+    - `move:copy` runs `copyFiles.executeCopy`: Year/Month or same-folders layout (`movePlan.destinationFor`, mirrored for previews in `utils/movePreview.js`). It copies to `.holdfast-partial`, hash-compares, renames, preserves mtime, and never overwrites.
+    - `move:freeUp` removes local copies verified in the backup via `deleteService.deleteVerifiedCopies`. The list comes from main's own `lastMove`, never the renderer. UI: `MoveView`.
   - **Find duplicates**: folders, each optionally marked **Keep**. With Keep folders it runs engine `compare` (Keep = protectedFolders); without them, engine `simple`. Results go straight to `ResultsView`.
-  - **Compare folders**: **Original** (protectedFolders) vs **Copy** (targetFolders), engine `compare`, default Thorough. It lands on `CompareView`: a verdict (census.sourceOnly = missing from the Copy), bar/boxes choosing the list, and a sortable panel. "Review and delete" drills into `ResultsView` with a scoped selection; Compare UI state lives in App (`compareUi`).
+  - **Check a backup** (`compare`): **Original** (protectedFolders) vs **Copy** (targetFolders), engine `compare`, default Thorough. It lands on `CompareView`: a verdict (census.sourceOnly = missing from the Copy), bar/boxes choosing the list, and a sortable panel. "Review and delete" drills into `ResultsView` with a scoped selection; Compare UI state lives in App (`compareUi`).
   - There is no separate Verify mode any more.
 - **Demo mode:** when `window.electronAPI` is absent (plain browser via `npm run dev:renderer`), `App.jsx` fakes scan progress and results.
 - **Delete safety chain** (all decided in main; the renderer only sends paths via `files:delete`):

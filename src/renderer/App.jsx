@@ -6,6 +6,7 @@ import HomeView from './views/HomeView.jsx';
 import ScanView from './views/ScanView.jsx';
 import ResultsView from './views/ResultsView.jsx';
 import CompareView from './views/CompareView.jsx';
+import MoveView from './views/MoveView.jsx';
 import DoneView from './views/DoneView.jsx';
 import RecoveryView from './views/RecoveryView.jsx';
 import HistoryView from './views/HistoryView.jsx';
@@ -212,11 +213,12 @@ export default function App() {
   // Compare folders shows the two-sided summary first; Find duplicates (and a
   // failed scan) goes straight to the duplicate groups.
   const isCompareJob = !!scan && jobOf(scan.config || {}) === 'compare';
-  const showCompare = isCompareJob && !!scan.result && !!scan.result.census && !scan.result.error && !showAllFiles;
+  const showMove = !!scan && jobOf(scan.config || {}) === 'move' && !!scan.result && !!scan.result.move && !scan.result.error;
+  const showCompare = !showMove && isCompareJob && !!scan.result && !!scan.result.census && !scan.result.error && !showAllFiles;
   const inScanFlow = view !== 'home';
   const title = inScanFlow
     ? (view === 'results'
-        ? (showCompare ? 'Compare folders' : 'Duplicate files')
+        ? (showMove ? 'Move to backup' : showCompare ? 'Check a backup' : 'Duplicate files')
         : { scanning: 'Scanning\u2026', done: 'Done' }[view])
     : SECTION_TITLES[section];
 
@@ -286,7 +288,10 @@ export default function App() {
               ui={compareUi} onUi={setCompareUi}
               onReviewFiles={(paths, label) => { setFileSelection(paths || null); setSelectionLabel(label || null); setShowAllFiles(true); }} onBack={handleReset} />
           )}
-          {view === 'results' && scan?.result && !showCompare && (
+          {view === 'results' && showMove && (
+            <MoveView scanResult={scan.result} scanConfig={scan.config} onDone={handleDeleteComplete} onBack={handleReset} />
+          )}
+          {view === 'results' && scan?.result && !showCompare && !showMove && (
             <ResultsView scanResult={scan.result} scanConfig={scan.config}
               onDeleteComplete={handleDeleteComplete}
               selection={fileSelection}

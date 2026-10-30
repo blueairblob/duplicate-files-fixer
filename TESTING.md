@@ -2,7 +2,7 @@
 
 A hands-on pass over everything changed in Phases A–D, using your own files. Allow about an hour. Work through it in order, and note anything that looks wrong, reads confusingly or feels slow. Odd wording counts too.
 
-**Safety first:** run every delete test against **copies**. Nothing is ever permanently deleted: files go to the Recycle Bin or to a `.holdfast-quarantine` folder on the same drive. Still, keep real originals in **Keep** folders (Find duplicates) or the **Original** box (Compare folders) until you trust the app.
+**Safety first:** run every delete test against **copies**. Nothing is ever permanently deleted: files go to the Recycle Bin or to a `.holdfast-quarantine` folder on the same drive. Still, keep real originals in **Keep** folders (Find duplicates) or the **Original** box (Check a backup) until you trust the app.
 
 ---
 
@@ -27,15 +27,27 @@ Write down what you changed; the tests below check that the app finds it.
 
 ---
 
-## 1. Home: two jobs
+## 1. Home: three jobs
 
-- [ ] Home offers exactly two choices: **Find duplicates** and **Compare folders**.
+- [ ] Home offers **Move to backup**, **Check a backup** and **Find duplicates**, in that order.
 - [ ] In Find duplicates, each folder row has a **Keep** switch. A kept folder shows a shield and tinted row.
 - [ ] Marking every folder Keep disables the start button and explains why.
 
-## 2. Compare folders: is everything backed up?
+## 1b. Move to backup: phone copy → NAS
 
-1. Home → **Compare folders**. Original = `D:\holdfast-test\originals`, Copy = `Z:\holdfast-test\backup`.
+1. Copy some photos from your phone to `D:\holdfast-test\phone`. Add a few that are already in `Z:\holdfast-test\backup`, and a re-import such as `IMG_1234 (1).HEIC`.
+2. Home → **Move to backup**. From = `D:\holdfast-test\phone`, To = `Z:\holdfast-test\backup`. Click **See what's new**.
+
+**Expect:**
+- [ ] "N new files to copy" counts only files the backup doesn't have anywhere. The re-import and the already-backed-up photos are under **Already in the backup**, next to their backup copy.
+- [ ] **Will be copied to** shows `Z:\holdfast-test\backup\YYYY\MM\…`. **Same folders** switches the preview.
+- [ ] **Copy N files to backup** shows progress and **Stop**, then "✓ N copied and verified". The files exist on the NAS with their original dates.
+- [ ] Nothing in the backup was overwritten. A different file with the same name was saved as `name (2).ext`.
+- [ ] **Free up space…** asks first, then removes the local copies to the Recycle Bin and shows the Done screen.
+
+## 2. Check a backup: is everything backed up?
+
+1. Home → **Check a backup**. Original = `D:\holdfast-test\originals`, Copy = `Z:\holdfast-test\backup`.
 2. Open **Scan options**. Match confidence should default to **Thorough**, marked Recommended. Click **Compare**.
 
 **Expect:**
@@ -49,7 +61,7 @@ Write down what you changed; the tests below check that the app finds it.
 
 Note how long the scan took: ______
 
-## 3. Compare folders, Standard and Quick match
+## 3. Check a backup, Standard and Quick match
 
 Repeat test 2 with **Scan options → Standard**, then with **Quick**.
 
@@ -91,7 +103,7 @@ Repeat test 2 with **Scan options → Standard**, then with **Quick**.
 
 - [ ] Find duplicates: `Z:\holdfast-test` plus `Z:\holdfast-test\backup` marked **Keep** (the Keep folder is inside the other). The scan **runs**, and nothing under `backup` is deletable.
 - [ ] Swap which one is Keep. The scan is **refused** with a red message explaining why.
-- [ ] Compare folders: Original = `\\192.168.0.101\public\holdfast-test`, Copy = `Z:\holdfast-test` (the same folder through two paths). The scan is **refused**.
+- [ ] Check a backup: Original = `\\192.168.0.101\public\holdfast-test`, Copy = `Z:\holdfast-test` (the same folder through two paths). The scan is **refused**.
 
 ## 8. Big scan, responsiveness
 
@@ -115,7 +127,7 @@ Note how many files were scanned and how long it took: ______
 - [ ] The Home options summary shows the exclusion count.
 - [ ] A folder you own named `Windows` (say `D:\holdfast-test\Windows`) **is** scanned; only `C:\Windows` is skipped.
 - [ ] **Settings → Scan cache** shows "N files remembered" after a scan. **Clear** empties it.
-- [ ] Scan options (types, size, confidence) are remembered after a restart, and Compare folders keeps its own confidence setting.
+- [ ] Scan options (types, size, confidence) are remembered after a restart, and Check a backup keeps its own confidence setting.
 
 ## 11. Odds and ends
 

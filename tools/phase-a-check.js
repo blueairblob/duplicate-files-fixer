@@ -22,7 +22,8 @@ const { Worker } = require('worker_threads');
 const SRC = path.join(__dirname, '..', 'src', 'main');
 const { checkRoots } = require(path.join(SRC, 'system'));
 const { buildSession, planDeletion } = require(path.join(SRC, 'deleteGuard'));
-const { createDeleteService, statForDelete } = require(path.join(SRC, 'deleteService'));
+const { createDeleteService, statForDelete, hashFull } = require(path.join(SRC, 'deleteService'));
+const { executeCopy } = require(path.join(SRC, 'copyFiles'));
 
 const [mappedRoot, uncRoot] = process.argv.slice(2).filter(a => !a.startsWith('--'));
 if (!mappedRoot || !uncRoot) {
@@ -47,7 +48,7 @@ function info(step, detail) {
 }
 
 const content = {};
-for (const k of ['A', 'B', 'C', 'D', 'X']) content[k] = crypto.randomBytes(200 * 1024 + k.charCodeAt(0));
+for (const k of ['A', 'B', 'C', 'D', 'E', 'X']) content[k] = crypto.randomBytes(200 * 1024 + k.charCodeAt(0));
 async function put(p, key) { await fsp.mkdir(path.dirname(p), { recursive: true }); await fsp.writeFile(p, content[key]); return p; }
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
@@ -179,6 +180,40 @@ async function main() {
   check('9  Compare folders lists Original files missing from the Copy (incl. .cr2)',
     JSON.stringify(missing) === JSON.stringify(['b.jpg', 'c.jpg', 'raw.cr2']),
     `missing=${missing.join(', ')} inBoth=${v.census.matched.targetFiles} onlyInCopy=${v.census.targetOnly.files}`);
+
+  // ── 10. Move to backup: phone copy → NAS, verified, then free up ──
+  // p-new is new; p-dup has the same content as keep/a.jpg already on the NAS.
+  await put(path.join(LOCAL, 'phone', 'DCIM', 'p-new.jpg'), 'E');
+  await put(path.join(LOCAL, 'phone', 'DCIM', 'p-dup.jpg'), 'A');
+  const mv = await runScan({ mode: 'compare', job: 'move', protectedFolders: [NAS], targetFolders: [path.join(LOCAL, 'phone')], confidence: 'thorough' });
+  const newNames = mv.move.newFiles.map(f => path.basename(f.path));
+  const inNames = mv.move.inBackup.map(x => path.basename(x.file.path));
+  check('10 move: only the new file is planned for copying', JSON.stringify(newNames) === '["p-new.jpg"]' && JSON.stringify(inNames) === '["p-dup.jpg"]',
+    `new=${newNames.join(',')} inBackup=${inNames.join(',')}`);
+  const cp = await executeCopy(mv.move.newFiles, { toRoot: NAS, layout: 'date' }, {
+    exists: exists,
+    mkdir: (d) => fsp.mkdir(d, { recursive: true }),
+    copyFile: (a, b) => fsp.copyFile(a, b, fs.constants.COPYFILE_EXCL),
+    hash: hashFull,
+    rename: (a, b) => fsp.rename(a, b),
+    remove: (p) => fsp.rm(p, { force: true }),
+    setTimes: (p, iso) => fsp.utimes(p, new Date(iso), new Date(iso)),
+  });
+  const landed = cp.copied[0] && cp.copied[0].backup;
+  check('10 move: copied to the NAS by Year/Month and verified',
+    cp.copied.length === 1 && landed && /[\\/]\d{4}[\\/]\d{2}[\\/]p-new\.jpg$/.test(landed) && (await hashFull(landed)) === (await hashFull(mv.move.newFiles[0].path)),
+    landed || JSON.stringify(cp.failed));
+  // Free up: quarantine inside the temp phone folder (no Recycle Bin clutter).
+  const svcLocal = createDeleteService({ userDataDir: USERDATA, homeDir: os.homedir(), trash: () => Promise.reject(new Error('test: no Recycle Bin')),
+    quarantineDirsFor: () => [path.join(LOCAL, 'phone', '.holdfast-quarantine')] });
+  const freeItems = [
+    ...cp.copied.map(c => ({ path: c.local, file: mv.move.newFiles.find(f => f.path === c.local), counterpart: c.backup, counterpartFile: null })),
+    ...mv.move.inBackup.map(x => ({ path: x.file.path, file: x.file, counterpart: x.backup, counterpartFile: null })),
+  ];
+  const fr = await svcLocal.deleteVerifiedCopies(freeItems);
+  check('10 move: free-up removed both local copies, backup untouched',
+    fr.deleted.length === 2 && !(await exists(path.join(LOCAL, 'phone', 'DCIM', 'p-new.jpg'))) && (await exists(landed)),
+    JSON.stringify({ deleted: fr.deleted.length, skipped: fr.skipped, failed: fr.failed }));
 
   // Leftover quarantined test file (b1) — removed in cleanup.
   return { leftovers: [qb1 && qb1.quarantinePath].filter(Boolean), ourQuarantinePaths: [qa1, qb1].filter(Boolean).map(e => e.quarantinePath) };

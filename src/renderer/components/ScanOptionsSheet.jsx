@@ -113,6 +113,12 @@ export default function ScanOptionsSheet({
           )}
 
           <p style={sectionTitle}>Match confidence</p>
+          {mode === 'move' ? (
+            <p style={{ fontSize: 'var(--fs-caption)', color: 'var(--text-secondary)', lineHeight: 1.5, marginBottom: scale(20) }}>
+              Move to backup always compares every byte. A file is only skipped, or later removed from the local copy, when
+              it's proven identical to a file in the backup.
+            </p>
+          ) : (<>
           <div style={{
             border: '1px solid var(--border)', borderRadius: 'var(--radius-md)',
             overflow: 'hidden', marginBottom: scale(20),
@@ -163,6 +169,7 @@ export default function ScanOptionsSheet({
               );
             })}
           </div>
+          </>)}
 
           <p style={sectionTitle}>File types</p>
           <div style={{ display: 'flex', gap: scale(6), flexWrap: 'wrap', marginBottom: scale(20) }}>

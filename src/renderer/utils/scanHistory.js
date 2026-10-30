@@ -66,9 +66,9 @@ export function clearHistory() {
 // ── Display helpers ──────────────────────────────────────────────────────────
 // The app has two jobs. Older entries only have a scan mode: 'simple' was
 // Find duplicates; 'compare' and 'verify' are now Compare folders.
-export const JOB_LABELS = { find: 'Find duplicates', compare: 'Compare folders' };
+export const JOB_LABELS = { move: 'Move to backup', find: 'Find duplicates', compare: 'Check a backup' };
 export function jobOf(e) {
-  if (e && (e.job === 'find' || e.job === 'compare')) return e.job;
+  if (e && (e.job === 'move' || e.job === 'find' || e.job === 'compare')) return e.job;
   return e && e.mode === 'simple' ? 'find' : 'compare';
 }
 
@@ -81,6 +81,7 @@ export function entryTitle(e) {
   const src = e.protectedFolders[0] ? leaf(e.protectedFolders[0]) : null;
   const tgt = e.targetFolders[0] ? leaf(e.targetFolders[0]) : null;
   if (jobOf(e) === 'find') return tgt || src || JOB_LABELS.find;
+  if (jobOf(e) === 'move') return src && tgt ? `${tgt} → ${src}` : JOB_LABELS.move;
   if (src && tgt) return `${src} vs ${tgt}`;
   return JOB_LABELS.compare;
 }
@@ -94,7 +95,7 @@ export function entrySubtitle(e) {
     : sameDay(d, yesterday) ? 'Yesterday'
     : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
   if (e.status !== 'complete') return `${when} \u00b7 not completed`;
-  const dupes = jobOf(e) === 'compare' ? JOB_LABELS.compare : `${e.duplicateGroups} dupes`;
+  const dupes = jobOf(e) === 'find' ? `${e.duplicateGroups} dupes` : JOB_LABELS[jobOf(e)];
   return `${when} \u00b7 ${dupes}`;
 }
 

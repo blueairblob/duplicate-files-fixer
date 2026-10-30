@@ -61,13 +61,9 @@ function createDeleteService({ userDataDir, homeDir, trash, quarantineDirsFor })
 
   let cancelRequested = false;
 
-  async function deleteFiles(session, payload, onProgress) {
+  // Runs executeDeletion with the app's real side effects.
+  async function runDeletion(items, { verifyContent, onProgress }) {
     cancelRequested = false;
-    const paths = ((payload && payload.files) || [])
-      .map(f => (typeof f === 'string' ? f : f && f.path))
-      .filter(Boolean);
-    const { items, rejected } = planDeletion(paths, session, { allowNoSurvivor: !!(payload && payload.allowNoSurvivor) });
-
     // Reuse the scan's signature cache when (size, mtime) still match — most
     // verifications then cost zero reads.
     let sigCache = null;
@@ -93,19 +89,35 @@ function createDeleteService({ userDataDir, homeDir, trash, quarantineDirsFor })
         return r;
       },
       isNetworkPath: makeIsNetworkPath(process.platform, await getNetworkMappings()),
-      verifyContent: !session || session.confidence !== 'thorough',
+      verifyContent,
       isCancelled: () => cancelRequested,
       onProgress,
     });
-
-    forgetPaths(session, [...results.trashed, ...results.quarantined]);
-    results.skipped.unshift(...rejected);
     results.deleted = [...results.trashed, ...results.quarantined];
     return results;
   }
 
+  async function deleteFiles(session, payload, onProgress) {
+    const paths = ((payload && payload.files) || [])
+      .map(f => (typeof f === 'string' ? f : f && f.path))
+      .filter(Boolean);
+    const { items, rejected } = planDeletion(paths, session, { allowNoSurvivor: !!(payload && payload.allowNoSurvivor) });
+    const results = await runDeletion(items, { verifyContent: !session || session.confidence !== 'thorough', onProgress });
+    forgetPaths(session, [...results.trashed, ...results.quarantined]);
+    results.skipped.unshift(...rejected);
+    return results;
+  }
+
+  // Move to backup's "free up space": remove local files whose copy in the
+  // backup was verified. Items come only from the main process's own move
+  // session; each is re-hashed against its backup copy right before removal.
+  async function deleteVerifiedCopies(items, onProgress) {
+    return runDeletion(items, { verifyContent: true, onProgress });
+  }
+
   return {
     deleteFiles,
+    deleteVerifiedCopies,
     cancel: () => { cancelRequested = true; },
     listQuarantine: async () => listQuarantine(await quarantineDirs()),
     restore: async (quarantinePath) => restoreFile(quarantinePath, await quarantineDirs()),
@@ -113,4 +125,4 @@ function createDeleteService({ userDataDir, homeDir, trash, quarantineDirsFor })
   };
 }
 
-module.exports = { createDeleteService, statForDelete };
+module.exports = { createDeleteService, statForDelete, hashFull };

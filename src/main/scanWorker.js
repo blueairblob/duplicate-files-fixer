@@ -25,6 +25,7 @@ const { isExcluded, compileExclusions } = require('./exclusions');
 const EXCLUSIONS = compileExclusions(workerData.exclusions || []);
 const { normaliseRoot } = require('./roots');
 const { shouldIncludeFile, sizeCandidates, buildGroups, buildCensus, censusProblems } = require('./scanCore');
+const { buildMovePlan } = require('./movePlan');
 
 // Protected folders that sit inside a target root (normalised, see roots.js).
 // The target walk skips them so protected files are never seen as target files.
@@ -390,7 +391,7 @@ async function walkRoots(roots, label, filters, allFiles, warnings, counter) {
 
 async function run() {
   perfPhase('walk');
-  const { mode, protectedFolders, targetFolders, filters, autoMarkRule, includeEmpty } = workerData;
+  const { mode, job, protectedFolders, targetFolders, filters, autoMarkRule, includeEmpty } = workerData;
 
   const warnings = [];
   const counter  = { walked: 0, hashed: 0 };
@@ -523,6 +524,18 @@ async function run() {
   // ── Duplicate groups (compare / simple modes) ────────────────────────────
   const groups = buildGroups(fileMap, mode, autoMarkRule);
 
+  // ── Move to backup: what to copy, what's already there ───────────────────
+  let move = null;
+  if (job === 'move' && mode === 'compare') {
+    const slim = f => ({ path: f.path, name: f.name, size: f.size, modified: f.modified, id: f.id, root: f.root, ext: f.ext });
+    const plan = buildMovePlan(nonEmptyFiles, fileMap, unreadable);
+    move = {
+      newFiles: plan.newFiles.map(slim),
+      inBackup: plan.inBackup.map(x => ({ file: slim(x.file), backup: x.backup })),
+      unreadable: plan.unreadable.map(slim),
+    };
+  }
+
 
   // ── Empty file groups ─────────────────────────────────────────────────────
   const emptyGroups = (includeEmpty && emptyFiles.length > 0)
@@ -549,6 +562,7 @@ async function run() {
       mode,
       confidence: CONFIDENCE,
       census,
+      move,
     },
   });
 }

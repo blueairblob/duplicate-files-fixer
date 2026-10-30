@@ -32,10 +32,18 @@ const startFind = (el) => Array.from(el.querySelectorAll('button')).filter(b => 
 const flush = () => act(async () => { await Promise.resolve(); });
 
 describe('HomeView jobs', () => {
-  it('offers exactly two jobs, Find duplicates first', () => {
+  it('offers three jobs in the order a backup happens, Move to backup first', () => {
     const { el } = render();
     const jobs = Array.from(el.querySelectorAll('[aria-label="What do you want to do?"] button')).map(b => b.textContent);
-    expect(jobs).toEqual(['Find duplicates', 'Compare folders']);
+    expect(jobs).toEqual(['Move to backup', 'Check a backup', 'Find duplicates']);
+    expect(el.querySelector('h1').textContent).toBe('Move to backup');
+  });
+
+  it('Move to backup scans the backup as protected and the local copy as target, always Thorough', async () => {
+    const { el, started } = render({ job: 'move', protectedFolders: ['/nas/Photos'], targetFolders: ['/phone'] });
+    click(button(el, /^See what’s new$/));
+    await flush();
+    expect(started[0]).toMatchObject({ job: 'move', mode: 'compare', protectedFolders: ['/nas/Photos'], targetFolders: ['/phone'], confidence: 'thorough' });
   });
 
   it('Find with a Keep folder scans Keep as protected and the rest as the clean-up target', async () => {
@@ -67,8 +75,8 @@ describe('HomeView jobs', () => {
   });
 
   it('old history entries map onto the new jobs', () => {
-    expect(render({ mode: 'verify', protectedFolders: ['/a'], targetFolders: ['/b'] }).el.querySelector('h1').textContent).toBe('Compare folders');
-    expect(render({ mode: 'compare', protectedFolders: ['/a'], targetFolders: ['/b'] }).el.querySelector('h1').textContent).toBe('Compare folders');
+    expect(render({ mode: 'verify', protectedFolders: ['/a'], targetFolders: ['/b'] }).el.querySelector('h1').textContent).toBe('Check a backup');
+    expect(render({ mode: 'compare', protectedFolders: ['/a'], targetFolders: ['/b'] }).el.querySelector('h1').textContent).toBe('Check a backup');
     const simple = render({ mode: 'simple', protectedFolders: [], targetFolders: ['/x'] }).el;
     expect(simple.querySelector('h1').textContent).toBe('Find duplicates');
   });

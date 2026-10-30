@@ -18,15 +18,18 @@ const RULE_LABELS = {
 };
 const CONFIDENCE_LABELS = { quick: 'quick match', standard: 'standard match', thorough: 'thorough match' };
 
-// The app does two jobs (like dupeGuru / Duplicate Cleaner for the first,
-// FreeFileSync-style left/right comparison for the second):
+// Three jobs, in the order a backup happens:
+//   move    — a local copy of a phone/device → the backup: copy only what the
+//             backup doesn't already have (anywhere), verify every copy, then
+//             optionally free up the local copies
+//   compare — "Check a backup": an Original against a Copy — what's missing,
+//             what's in both, what's only in the copy
 //   find    — duplicates within any set of folders; folders marked Keep are
 //             compared against but never touched
-//   compare — an Original against a Copy (e.g. a backup): what's missing,
-//             what's in both, what's only in the copy
 const JOBS = [
+  { id: 'move',    label: 'Move to backup',  hint: 'Copy what’s new from a phone or device copy into your backup, then free up the space' },
+  { id: 'compare', label: 'Check a backup',  hint: 'Check an original against a copy or backup: what’s missing, matched, or extra' },
   { id: 'find',    label: 'Find duplicates', hint: 'Find and remove duplicate files in one or more folders' },
-  { id: 'compare', label: 'Compare folders', hint: 'Check an original against a copy or backup: what’s missing, matched, or extra' },
 ];
 
 // ── Folder zone ──────────────────────────────────────────────────────────────
@@ -154,6 +157,11 @@ function FolderZone({ label, sublabel, Icon, iconColor, folders, onAddPath, onRe
 
 // Why a scan can't start, in the words of the job (see roots.js codes).
 function rootProblemText(job, b) {
+  if (job === 'move') {
+    return b.code === 'same'
+      ? `“From” and “To” are the same folder (${b.protected}).`
+      : `“${b.target}” is already inside the backup folder “${b.protected}”. Pick the local copy, outside the backup.`;
+  }
   if (job === 'find') {
     return b.code === 'same'
       ? `“${b.target}” is listed twice — once as Keep and once to clean up.`
@@ -173,7 +181,9 @@ export default function HomeView({ onStartScan, preset = null }) {
     api?.getExclusions?.().then(list => setExclusionCount(Array.isArray(list) ? list.length : 0)).catch(() => {});
   }, []);
 
-  const [job, setJob] = useState('find');
+  const [job, setJob] = useState('move');
+  const [moveFrom, setMoveFrom] = useState([]);
+  const [moveTo, setMoveTo] = useState([]);   // exactly one backup folder
   const [findFolders, setFindFolders] = useState([]);
   const [keep, setKeep] = useState(() => new Set());
   const [originalFolders, setOriginalFolders] = useState([]);
@@ -192,8 +202,10 @@ export default function HomeView({ onStartScan, preset = null }) {
   // defaults to Standard: every deletion is checked byte-for-byte anyway.
   const [findConfidence, setFindConfidence] = useState(savedOptions.confidence || 'standard');
   const [compareConfidence, setCompareConfidence] = useState(savedOptions.compareConfidence || savedOptions.verifyConfidence || 'thorough');
-  const confidence = job === 'compare' ? compareConfidence : findConfidence;
-  const setConfidence = job === 'compare' ? setCompareConfidence : setFindConfidence;
+  // Move to backup always reads every byte: it skips and later removes files
+  // only when they're proven identical to the backup copy.
+  const confidence = job === 'move' ? 'thorough' : job === 'compare' ? compareConfidence : findConfidence;
+  const setConfidence = job === 'move' ? () => {} : job === 'compare' ? setCompareConfidence : setFindConfidence;
 
   useEffect(() => {
     try {
@@ -209,7 +221,10 @@ export default function HomeView({ onStartScan, preset = null }) {
     const j = jobOf(preset);
     setJob(j);
     if (preset.confidence) (j === 'compare' ? setCompareConfidence : setFindConfidence)(preset.confidence);
-    if (j === 'find') {
+    if (j === 'move') {
+      setMoveTo((preset.protectedFolders || []).slice(0, 1));
+      setMoveFrom(preset.targetFolders || []);
+    } else if (j === 'find') {
       setFindFolders([...(preset.protectedFolders || []), ...(preset.targetFolders || [])]);
       setKeep(new Set(preset.protectedFolders || []));
     } else {
@@ -232,17 +247,20 @@ export default function HomeView({ onStartScan, preset = null }) {
 
   const keptFolders = findFolders.filter(f => keep.has(f));
   const cleanFolders = findFolders.filter(f => !keep.has(f));
-  const canScan = job === 'find' ? cleanFolders.length > 0 : originalFolders.length > 0 && copyFolders.length > 0;
+  const canScan = job === 'move' ? moveFrom.length > 0 && moveTo.length === 1
+    : job === 'find' ? cleanFolders.length > 0
+    : originalFolders.length > 0 && copyFolders.length > 0;
 
   // Overlapping or aliased folders are checked before the scan starts (and
   // again in the main process). See src/main/roots.js for the rules.
   const [rootProblem, setRootProblem] = useState(null);
-  useEffect(() => { setRootProblem(null); }, [job, findFolders, keep, originalFolders, copyFolders]);
+  useEffect(() => { setRootProblem(null); }, [job, findFolders, keep, originalFolders, copyFolders, moveFrom, moveTo]);
 
   // Engine mapping: Find with Keep folders is a protected-vs-target scan;
   // without them it's a plain duplicate scan. Compare is always two-sided.
   const buildConfig = () => {
     const base = { job, filters: { types, minSize }, autoMarkRule, includeEmpty, confidence };
+    if (job === 'move') return { ...base, mode: 'compare', protectedFolders: moveTo, targetFolders: moveFrom, confidence: 'thorough' };
     if (job === 'compare') return { ...base, mode: 'compare', protectedFolders: originalFolders, targetFolders: copyFolders };
     return keptFolders.length > 0
       ? { ...base, mode: 'compare', protectedFolders: keptFolders, targetFolders: cleanFolders }
@@ -276,7 +294,7 @@ export default function HomeView({ onStartScan, preset = null }) {
       <div style={{ maxWidth: scale(680), margin: '0 auto', padding: `${scale(28)}px ${scale(32)}px ${scale(32)}px` }}>
 
         <h1 style={{ fontSize: 'var(--fs-title)', fontWeight: 500, marginBottom: scale(4) }}>
-          {job === 'find' ? 'Find duplicates' : 'Compare folders'}
+          {JOBS.find(j => j.id === job).label}
         </h1>
         <p style={{ fontSize: 'var(--fs-body)', color: 'var(--text-secondary)', marginBottom: scale(24) }}>
           {JOBS.find(j => j.id === job).hint}.
@@ -304,7 +322,26 @@ export default function HomeView({ onStartScan, preset = null }) {
         </div>
 
         {/* Folder zones — the hero of the screen */}
-        {job === 'find' ? (
+        {job === 'move' ? (
+          <div style={{ display: 'flex', gap: scale(16), marginBottom: scale(20) }}>
+            <FolderZone
+              label="From"
+              sublabel="A local copy from a phone, camera or other device. Nothing here is removed unless you choose to, after it's verified in the backup."
+              Icon={FolderIcon} iconColor="var(--text-secondary)"
+              folders={moveFrom}
+              onAddPath={p => addPathTo(setMoveFrom, p)}
+              onRemove={f => setMoveFrom(prev => prev.filter(x => x !== f))}
+            />
+            <FolderZone
+              label="To (your backup)"
+              sublabel="Your backup folder, e.g. on a NAS. The whole folder is checked, so files already there under any name aren't copied twice."
+              Icon={ShieldIcon} iconColor="var(--accent)"
+              folders={moveTo}
+              onAddPath={p => setMoveTo([p])}
+              onRemove={() => setMoveTo([])}
+            />
+          </div>
+        ) : job === 'find' ? (
           <div style={{ marginBottom: scale(20) }}>
             <FolderZone
               label="Folders to search"
@@ -368,7 +405,7 @@ export default function HomeView({ onStartScan, preset = null }) {
             fontSize: 'var(--fs-body)', padding: `${scale(9)}px ${scale(24)}px`,
             opacity: canScan ? 1 : 0.45, cursor: canScan ? 'pointer' : 'not-allowed',
           }}>
-            {job === 'find' ? 'Find duplicates' : 'Compare'}
+            {job === 'find' ? 'Find duplicates' : job === 'move' ? 'See what’s new' : 'Compare'}
           </button>
           <span style={{
             display: 'inline-flex', alignItems: 'center', gap: scale(5),
@@ -386,7 +423,9 @@ export default function HomeView({ onStartScan, preset = null }) {
         )}
         {!canScan && (
           <p style={{ marginTop: scale(8), fontSize: 'var(--fs-caption)', color: 'var(--text-muted)' }}>
-            {job === 'compare'
+            {job === 'move'
+              ? 'Add the local copy (From) and your backup folder (To).'
+              : job === 'compare'
               ? 'Add an Original and a Copy to compare.'
               : findFolders.length > 0
                 ? 'Every folder is marked Keep. Add a folder to clean up, or un-Keep one.'

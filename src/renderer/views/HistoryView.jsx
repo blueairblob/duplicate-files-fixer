@@ -42,7 +42,7 @@ export default function HistoryView({ entries, onLoadEntry, onRemoveEntry, onCle
             background: 'var(--bg-card)', overflow: 'hidden',
           }}>
             {entries.map((e, i) => {
-              const ModeIcon = jobOf(e) === 'find' ? SearchIcon : ShieldIcon;
+              const ModeIcon = jobOf(e) === 'find' ? SearchIcon : jobOf(e) === 'move' ? ArrowRightIcon : ShieldIcon;
               return (
                 <div key={e.id}
                   role="button" tabIndex={0}
