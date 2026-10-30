@@ -1,6 +1,6 @@
 // Scan history, persisted in localStorage. Each entry stores enough of the
 // scan config to reload the setup (mode + folder lists) plus display metadata.
-const KEY = 'dff-scan-history';
+const KEY = 'holdfast-scan-history';
 const MAX_ENTRIES = 20;
 
 export function loadHistory() {

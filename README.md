@@ -1,4 +1,4 @@
-# Duplicate Files Fixer — Desktop Prototype
+# Holdfast — Desktop Prototype
 
 A working Electron + React prototype covering the core features from the PRD (see `PLAN.md`).
 
@@ -22,7 +22,7 @@ A working Electron + React prototype covering the core features from the PRD (se
 - **Zero-byte file detection** — listed separately from content duplicates (for reference; not deleted)
 - **Scan warnings panel** — permission errors, locked files, etc. surfaced instead of silently skipped
 - Manual selection override, Select All / Deselect All
-- Confirm → delete to the **system Recycle Bin**, with a **quarantine fallback**: network drives (which have no Recycle Bin) and systems where the OS trash can't be reached use a `.dff-quarantine` folder on the **same drive** as the file. **Nothing is ever permanently deleted** — if neither works, the file is left in place and reported.
+- Confirm → delete to the **system Recycle Bin**, with a **quarantine fallback**: network drives (which have no Recycle Bin) and systems where the OS trash can't be reached use a `.holdfast-quarantine` folder on the **same drive** as the file. **Nothing is ever permanently deleted** — if neither works, the file is left in place and reported.
 - **Safety rules enforced in the main process** — Keep/Original files, overlapping folders (e.g. Keep `D:\Photos` inside `D:\`) and one folder reached by two paths (a mapped drive and its `\\nas` path) can never lead to deleting the only copy.
 - **Recovery panel** — browse every quarantine folder the app has used and restore files to their original location
 - Post-deletion summary screen
@@ -43,11 +43,11 @@ Scanning a NAS over SMB was the hardest problem in this project, and the fixes a
 Verbose per-phase and per-file timings are off by default. To turn them on:
 
 ```powershell
-$env:DFF_PERF=1 ; npm run dev     # PowerShell
+$env:HOLDFAST_PERF=1 ; npm run dev     # PowerShell
 ```
 
 ```bash
-DFF_PERF=1 npm run dev            # bash
+HOLDFAST_PERF=1 npm run dev            # bash
 ```
 
 Without the flag each scan prints a single summary line plus the comparison census.
@@ -151,7 +151,7 @@ It creates and removes its own test folder on the share.
 Deletion tries three routes, in order:
 
 1. **System Recycle Bin** (`shell.trashItem`) — the normal path on Windows/macOS. Recover these the usual way, from the OS Recycle Bin / Trash on your desktop.
-2. **Same-drive quarantine** — used for network drives (the Windows Recycle Bin refuses them) and whenever the OS trash can't be reached. Files are moved (never copied across drives) into `.dff-quarantine` at the top of the file's drive. If that isn't writable, the app tries the scan folder and then your home folder, as long as it's on the same drive. Each folder keeps an append-only `manifest.jsonl`. Browse and restore from **Quarantine** in the sidebar. Restore refuses to overwrite a file that has since reappeared at the original path, and recreates the parent folder if it was removed.
+2. **Same-drive quarantine** — used for network drives (the Windows Recycle Bin refuses them) and whenever the OS trash can't be reached. Files are moved (never copied across drives) into `.holdfast-quarantine` at the top of the file's drive. If that isn't writable, the app tries the scan folder and then your home folder, as long as it's on the same drive. Each folder keeps an append-only `manifest.jsonl`. Browse and restore from **Quarantine** in the sidebar. Restore refuses to overwrite a file that has since reappeared at the original path, and recreates the parent folder if it was removed.
 3. **Left in place** — if neither works, the file is not deleted and the Done screen says why. There is no permanent-delete fallback.
 
 The Quarantine panel shows the app's quarantine folders only — not the system Recycle Bin.
@@ -198,8 +198,8 @@ node tools/run-smoke.js   # smoke-test the packaged app under release/
 - `src/main` is unpacked from `app.asar`, because worker threads can't load from inside it.
 - **If electron-builder fails with `EPERM … rename … win-unpacked.tmp`**, something (usually antivirus) is locking the freshly extracted files in the project folder. Build somewhere else, then point the smoke test at it:
   ```
-  npx electron-builder --dir --config.directories.output=%TEMP%\dff-release
-  set DFF_RELEASE_DIR=%TEMP%\dff-release && node tools\run-smoke.js
+  npx electron-builder --dir --config.directories.output=%TEMP%\holdfast-release
+  set HOLDFAST_RELEASE_DIR=%TEMP%\holdfast-release && node tools\run-smoke.js
   ```
 
 ### Security

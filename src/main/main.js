@@ -24,6 +24,7 @@ const { checkRoots } = require('./system');
 const { createDeleteService } = require('./deleteService');
 const { getLocations } = require('./locations');
 const { makeAppUrlCheck, hardenWebContents, denyAllPermissions } = require('./security');
+const { migrateUserData } = require('./migrate');
 
 const isDev = process.env.NODE_ENV === 'development';
 const DEV_URL = 'http://localhost:5173';
@@ -31,17 +32,24 @@ const INDEX_PATH = path.join(__dirname, '../../dist/index.html');
 // Worker threads can't load from inside app.asar; package.json unpacks
 // src/main (the worker and the modules it requires) next to it.
 const WORKER_PATH = path.join(__dirname, 'scanWorker.js').replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`);
-// DFF_SMOKE=1: load the built page in a hidden window, run one real scan,
+// HOLDFAST_SMOKE=1: load the built page in a hidden window, run one real scan,
 // print the result and exit (used by `npm run smoke` and CI).
-const SMOKE = process.env.DFF_SMOKE === '1';
+const SMOKE = process.env.HOLDFAST_SMOKE === '1';
 // The smoke test gets its own throwaway userData (cache, exclusions,
 // quarantine registry), so running it never touches the real app's state.
 // Electron keeps this folder locked while running, so it's emptied at the
 // start of the next run rather than at exit.
-const SMOKE_USERDATA = SMOKE ? path.join(os.tmpdir(), 'dff-smoke-userdata') : null;
+const SMOKE_USERDATA = SMOKE ? path.join(os.tmpdir(), 'holdfast-smoke-userdata') : null;
 if (SMOKE) {
   try { fs.rmSync(SMOKE_USERDATA, { recursive: true, force: true }); } catch { /* still locked by an old run */ }
   app.setPath('userData', SMOKE_USERDATA);
+} else {
+  // First start after the rename: copy data from the placeholder-name
+  // app-data folder (cache, exclusions, quarantine registry, settings).
+  try {
+    const m = migrateUserData({ appDataDir: app.getPath('appData'), userDataDir: app.getPath('userData') });
+    if (m.copied.length) console.log('[migrate] carried over:', m.copied.join(', '));
+  } catch (e) { console.error('[migrate] failed:', e.message); }
 }
 const isAppUrl = makeAppUrlCheck({ isDev, devUrl: DEV_URL, indexPath: INDEX_PATH });
 
@@ -127,7 +135,7 @@ app.whenReady().then(() => {
   });
 });
 
-// ── Smoke test (DFF_SMOKE=1) ─────────────────────────────────────────────────
+// ── Smoke test (HOLDFAST_SMOKE=1) ─────────────────────────────────────────────────
 // Proves a build works end to end without anyone looking at it: the page
 // renders under the sandbox + CSP with the preload bridge and without Node,
 // and the page drives the real IPC handlers — root checks, a compare scan (the
@@ -159,7 +167,7 @@ async function runSmoke() {
   // Drive the real preload bridge and IPC handlers from the page, the way the
   // UI does: root checks, a compare scan, a delete the guard must partly
   // refuse, then the quarantine listing and a restore.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dff-smoke-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'holdfast-smoke-'));
   const P = {
     dir,
     src: path.join(dir, 'src'),
@@ -207,9 +215,9 @@ async function runSmoke() {
     && (isDev || report.page.csp) && ipcOk && report.errors.length === 0);
   console.log('[smoke] ' + JSON.stringify(report));
   console.log(`[smoke] ${ok ? 'PASS' : 'FAIL'}`);
-  // Packaged Windows builds are GUI programs with no console; DFF_SMOKE_OUT
+  // Packaged Windows builds are GUI programs with no console; HOLDFAST_SMOKE_OUT
   // gives CI a file to read instead.
-  if (process.env.DFF_SMOKE_OUT) fs.writeFileSync(process.env.DFF_SMOKE_OUT, JSON.stringify({ ok, ...report }, null, 2));
+  if (process.env.HOLDFAST_SMOKE_OUT) fs.writeFileSync(process.env.HOLDFAST_SMOKE_OUT, JSON.stringify({ ok, ...report }, null, 2));
   return ok;
 }
 
@@ -239,8 +247,8 @@ handle('dialog:saveTextFile', async (_event, defaultName, content) => {
 handle('fs:getLocations', async () => getLocations());
 
 // ── IPC: Exclusion list (in-memory; persisted properly in Sprint 4) ──────────
-// Exclusions persist in userData/dff-exclusions.json (written atomically).
-const exclusionsPath = () => path.join(app.getPath('userData'), 'dff-exclusions.json');
+// Exclusions persist in userData/holdfast-exclusions.json (written atomically).
+const exclusionsPath = () => path.join(app.getPath('userData'), 'holdfast-exclusions.json');
 async function loadExclusions() {
   if (exclusionList) return exclusionList;
   try {
@@ -312,7 +320,7 @@ handle('scan:start', async (event, opts) => {
         platform: process.platform,
         rootExcludes: roots.excludeFromTarget,
         // Signature cache: (path, size, mtime) → hashes, reused across scans
-        cachePath: path.join(app.getPath('userData'), 'dff-signature-cache.json'),
+        cachePath: path.join(app.getPath('userData'), 'holdfast-signature-cache.json'),
       },
     });
     activeWorker = worker;
@@ -371,7 +379,7 @@ function getDeleteService() {
       // Smoke test: no Recycle Bin, and quarantine only inside the scan root
       // (its temp folder) — never the volume root or home folder.
       trash: SMOKE ? () => Promise.reject(new Error('smoke test: Recycle Bin disabled')) : (p) => shell.trashItem(p),
-      quarantineDirsFor: SMOKE ? (_p, file) => [path.join(file.root, '.dff-quarantine')] : undefined,
+      quarantineDirsFor: SMOKE ? (_p, file) => [path.join(file.root, '.holdfast-quarantine')] : undefined,
     });
   }
   return deleteService;
@@ -386,7 +394,7 @@ handle('files:delete', async (event, payload) => {
 
 // Signature cache. The worker writes a small .meta.json next to the cache, so
 // the Settings page never has to parse the (possibly 100 MB) cache itself.
-const sigCachePath = () => path.join(app.getPath('userData'), 'dff-signature-cache.json');
+const sigCachePath = () => path.join(app.getPath('userData'), 'holdfast-signature-cache.json');
 
 handle('cache:info', async () => {
   const p = sigCachePath();

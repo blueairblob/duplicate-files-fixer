@@ -235,7 +235,7 @@ describe('makeIsNetworkPath', () => {
 // ── quarantine (real temp folders) ───────────────────────────────────────────
 
 let tmp;
-beforeEach(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dff-q-')); });
+beforeEach(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'holdfast-q-')); });
 afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
 
 describe('quarantine', () => {
@@ -246,7 +246,7 @@ describe('quarantine', () => {
     fs.writeFileSync(file, 'data');
 
     // Explicit dirs keep the test inside tmp (never touch the real volume root).
-    const dirs = [path.join(scanRoot, '.dff-quarantine')];
+    const dirs = [path.join(scanRoot, '.holdfast-quarantine')];
     const { quarantinePath, dir } = await quarantineFile(file, { dirs });
     expect(fs.existsSync(file)).toBe(false);
     expect(fs.readFileSync(quarantinePath, 'utf8')).toBe('data');
@@ -268,7 +268,7 @@ describe('quarantine', () => {
   });
 
   it('keeps other records when one manifest line is corrupt', async () => {
-    const dir = path.join(tmp, '.dff-quarantine');
+    const dir = path.join(tmp, '.holdfast-quarantine');
     fs.mkdirSync(dir);
     const q1 = path.join(dir, '1_a.jpg');
     fs.writeFileSync(q1, 'x');
@@ -279,7 +279,7 @@ describe('quarantine', () => {
   });
 
   it('reads the legacy manifest.json', async () => {
-    const dir = path.join(tmp, '.dff-quarantine');
+    const dir = path.join(tmp, '.holdfast-quarantine');
     fs.mkdirSync(dir);
     const q1 = path.join(dir, '1_old.jpg');
     fs.writeFileSync(q1, 'x');
@@ -291,13 +291,13 @@ describe('quarantine', () => {
     const file = path.join(tmp, 'a.jpg');
     fs.writeFileSync(file, 'data');
     const dirs = await candidateDirs(file, { scanRoot: tmp, homeDir: os.homedir() });
-    expect(dirs[0].endsWith('.dff-quarantine')).toBe(true);
-    expect(dirs).toContain(path.join(tmp, '.dff-quarantine'));
-    expect(dirs[dirs.length - 1]).toBe(path.join(os.homedir(), '.dff-quarantine'));
+    expect(dirs[0].endsWith('.holdfast-quarantine')).toBe(true);
+    expect(dirs).toContain(path.join(tmp, '.holdfast-quarantine'));
+    expect(dirs[dirs.length - 1]).toBe(path.join(os.homedir(), '.holdfast-quarantine'));
   });
 
   it('refuses to restore outside a known quarantine folder', async () => {
-    const r = await restoreFile(path.join(tmp, 'elsewhere', 'x'), [path.join(tmp, '.dff-quarantine')]);
+    const r = await restoreFile(path.join(tmp, 'elsewhere', 'x'), [path.join(tmp, '.holdfast-quarantine')]);
     expect(r.success).toBe(false);
   });
 
@@ -306,7 +306,7 @@ describe('quarantine', () => {
     const file = path.join(scanRoot, 'a.jpg');
     fs.mkdirSync(scanRoot, { recursive: true });
     fs.writeFileSync(file, 'old');
-    const { quarantinePath, dir } = await quarantineFile(file, { dirs: [path.join(scanRoot, '.dff-quarantine')] });
+    const { quarantinePath, dir } = await quarantineFile(file, { dirs: [path.join(scanRoot, '.holdfast-quarantine')] });
     fs.writeFileSync(file, 'new');
     const r = await restoreFile(quarantinePath, [dir]);
     expect(r.success).toBe(false);

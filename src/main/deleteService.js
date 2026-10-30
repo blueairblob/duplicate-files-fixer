@@ -10,6 +10,7 @@ const { planDeletion, forgetPaths } = require('./deleteGuard');
 const { executeDeletion, makeIsNetworkPath } = require('./deleteFiles');
 const { quarantineFile, listQuarantine, restoreFile } = require('./quarantine');
 const { getNetworkMappings } = require('./system');
+const { LEGACY_QUARANTINE } = require('./migrate');
 
 // Same size/mtime/identity format the scan worker records.
 async function statForDelete(p) {
@@ -36,21 +37,23 @@ function hashFull(p) {
  *                (the smoke test keeps it inside its own temp folder)
  */
 function createDeleteService({ userDataDir, homeDir, trash, quarantineDirsFor }) {
-  const sigCachePath = path.join(userDataDir, 'dff-signature-cache.json');
-  const registryPath = path.join(userDataDir, 'dff-quarantine-dirs.json');
-  const legacyDir = path.join(homeDir, '.dff-quarantine');
+  const sigCachePath = path.join(userDataDir, 'holdfast-signature-cache.json');
+  const registryPath = path.join(userDataDir, 'holdfast-quarantine-dirs.json');
+  // Home-folder quarantines are always listed: the current one, and the one
+  // the app used before the Holdfast rename (see migrate.js).
+  const homeDirs = [path.join(homeDir, '.holdfast-quarantine'), path.join(homeDir, LEGACY_QUARANTINE)];
 
   // Every quarantine folder ever used, so Recovery can list them all.
   async function quarantineDirs() {
     let dirs = [];
     try { dirs = JSON.parse(await fs.promises.readFile(registryPath, 'utf8')); } catch { /* none yet */ }
     if (!Array.isArray(dirs)) dirs = [];
-    return Array.from(new Set([legacyDir, ...dirs]));
+    return Array.from(new Set([...homeDirs, ...dirs]));
   }
   async function rememberDir(dir) {
     const dirs = await quarantineDirs();
     if (dirs.includes(dir)) return;
-    const next = [...dirs.filter(d => d !== legacyDir), dir];
+    const next = [...dirs.filter(d => !homeDirs.includes(d)), dir];
     const tmp = registryPath + '.tmp';
     await fs.promises.writeFile(tmp, JSON.stringify(next, null, 2));
     await fs.promises.rename(tmp, registryPath);

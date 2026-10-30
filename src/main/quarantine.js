@@ -3,9 +3,9 @@
 // A file is only ever MOVED (rename) into a quarantine folder on the same
 // volume, never copied across devices and never unlinked. Candidate folders,
 // in order:
-//   1. <top of the file's volume>/.dff-quarantine
-//   2. <the scan root the file came from>/.dff-quarantine
-//   3. <home>/.dff-quarantine
+//   1. <top of the file's volume>/.holdfast-quarantine
+//   2. <the scan root the file came from>/.holdfast-quarantine
+//   3. <home>/.holdfast-quarantine
 // If none can take a same-volume rename, quarantine fails and the caller
 // reports the file as "not deleted".
 //
@@ -20,7 +20,7 @@ const fsp = fs.promises;
 const path = require('path');
 const crypto = require('crypto');
 
-const DIR_NAME = '.dff-quarantine';
+const DIR_NAME = '.holdfast-quarantine';
 const LOG_NAME = 'manifest.jsonl';
 const LEGACY_NAME = 'manifest.json';
 

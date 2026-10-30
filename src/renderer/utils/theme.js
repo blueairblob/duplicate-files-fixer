@@ -1,6 +1,6 @@
 // Theme preference: 'system' | 'light' | 'dark'.
 // 'system' removes the attribute so the prefers-color-scheme media query rules.
-const KEY = 'dff-theme';
+const KEY = 'holdfast-theme';
 
 export function getTheme() {
   try { return localStorage.getItem(KEY) || 'system'; } catch { return 'system'; }

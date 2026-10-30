@@ -27,7 +27,7 @@ const write = (rel, content) => {
   return p;
 };
 
-beforeEach(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dff-worker-')); });
+beforeEach(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'holdfast-worker-')); });
 afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
 
 const allPaths = (result) => result.groups.flatMap(g => g.files.map(f => f.path));

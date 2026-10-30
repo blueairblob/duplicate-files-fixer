@@ -13,12 +13,12 @@ npm install            # .npmrc sets legacy-peer-deps=true on purpose (plugin-re
 npm run dev            # Vite on :5173 + Electron (NODE_ENV=development, UV_THREADPOOL_SIZE=64)
 npm run build          # vite build -> dist/, then electron-builder -> release/ (NSIS / dmg / AppImage)
 npm run pack           # packaged app, unpacked, no installer
-npm run smoke          # vite build + Electron with DFF_SMOKE=1: hidden window, render + scan check, exit 0/1
-node tools/run-smoke.js                          # smoke-test a packaged app (DFF_RELEASE_DIR overrides release/)
+npm run smoke          # vite build + Electron with HOLDFAST_SMOKE=1: hidden window, render + scan check, exit 0/1
+node tools/run-smoke.js                          # smoke-test a packaged app (HOLDFAST_RELEASE_DIR overrides release/)
 npm test                                         # all tests (vitest run)
 npx vitest run src/tests/exclusions.test.js      # single file
 npx vitest run -t "glob"                         # tests matching a name
-DFF_PERF=1 npm run dev                           # verbose per-phase/per-file scan timings
+HOLDFAST_PERF=1 npm run dev                           # verbose per-phase/per-file scan timings
 node tools/bench-smb.js "<folder>"               # SMB read-throughput benchmark (set UV_THREADPOOL_SIZE=64 first)
 node tools/bench-walk.js <parent> [folders] [files] # many-small-folders scan benchmark (creates + removes a tree)
 ```
@@ -53,10 +53,10 @@ Three process layers:
   - `roots.js` blocks overlapping/aliased roots at scan start (also via `scan:checkRoots` from Home) and gives the worker protected subtrees to skip. The worker dedupes files by `dev:ino` identity.
   - `deleteGuard.js` keeps a session built from the last completed scan. It allows only non-protected group members outside protected roots, and keeps a survivor unless `allowNoSurvivor`.
   - `deleteFiles.js` re-checks each file (unchanged since scan, kept copy present and a different physical file, content hash below Thorough or when the kept copy changed). It then routes to `shell.trashItem` (local paths only) or `quarantine.js`.
-  - `quarantine.js` moves files into `<volume>/.dff-quarantine` (then scan root, then home), same-volume only. It keeps an append-only `manifest.jsonl`; known folders are listed in `userData/dff-quarantine-dirs.json`.
+  - `quarantine.js` moves files into `<volume>/.holdfast-quarantine` (then scan root, then home), same-volume only. It keeps an append-only `manifest.jsonl`; known folders are listed in `userData/holdfast-quarantine-dirs.json`.
   - **Nothing is ever permanently deleted**: if no route works, the file is reported as not deleted.
-- **Signature cache:** `userData/dff-signature-cache.json`, keyed on path + size + mtime. Written by the worker, reused by delete-time verification.
-- **Persistence:** exclusions persist in `userData/dff-exclusions.json` (defaults in `exclusions.js`; name/glob entries match only below the scan root; path prefixes need a folder boundary). Scan options, history (`utils/scanHistory.js`) and theme (`utils/theme.js`) use renderer `localStorage`.
+- **Signature cache:** `userData/holdfast-signature-cache.json`, keyed on path + size + mtime. Written by the worker, reused by delete-time verification.
+- **Persistence:** exclusions persist in `userData/holdfast-exclusions.json` (defaults in `exclusions.js`; name/glob entries match only below the scan root; path prefixes need a folder boundary). Scan options, history (`utils/scanHistory.js`) and theme (`utils/theme.js`) use renderer `localStorage`.
 - **Deletes run as a job:** `executeDeletion` checks up to 4 files at once but moves them one at a time; `files:cancelDelete` stops it, and network files are always content-compared at delete time.
 - **Results screen:** groups render 200 per page via the memoized `GroupCard`, and start collapsed above 50 groups. Keep per-click work proportional to what changed.
 - **Styling:** design tokens as CSS variables in `index.css` (light/dark via `data-theme`). Use `scale(px)` from `useDPR` for inline sizes. It is 1:1 by default, since the OS handles HiDPI; the old compact sizing only applies when the Settings toggle is on.

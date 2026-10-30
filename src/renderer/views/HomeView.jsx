@@ -181,7 +181,7 @@ export default function HomeView({ onStartScan, preset = null }) {
 
   // Scan options persist across sessions
   const savedOptions = (() => {
-    try { return JSON.parse(localStorage.getItem('dff-scan-options')) || {}; } catch { return {}; }
+    try { return JSON.parse(localStorage.getItem('holdfast-scan-options')) || {}; } catch { return {}; }
   })();
   const [types, setTypes] = useState(savedOptions.types || []);
   const [minSize, setMinSize] = useState(savedOptions.minSize || 0);
@@ -197,7 +197,7 @@ export default function HomeView({ onStartScan, preset = null }) {
 
   useEffect(() => {
     try {
-      localStorage.setItem('dff-scan-options', JSON.stringify({ types, minSize, includeEmpty, autoMarkRule, confidence: findConfidence, compareConfidence }));
+      localStorage.setItem('holdfast-scan-options', JSON.stringify({ types, minSize, includeEmpty, autoMarkRule, confidence: findConfidence, compareConfidence }));
     } catch { /* non-fatal */ }
   }, [types, minSize, includeEmpty, autoMarkRule, findConfidence, compareConfidence]);
   const [optionsOpen, setOptionsOpen] = useState(false);

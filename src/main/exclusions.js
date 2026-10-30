@@ -18,7 +18,7 @@ const DEFAULT_EXCLUSIONS = [
   // Cloud sync caches — these change constantly and produce false-positive "duplicate" noise
   'OneDriveTemp',
   '.dropbox.cache',
-  '.dff-quarantine', // our own quarantine folder must never be re-scanned
+  '.holdfast-quarantine', // our own quarantine folder must never be re-scanned
   // macOS metadata
   '.DS_Store',
   '.Spotlight-V100',

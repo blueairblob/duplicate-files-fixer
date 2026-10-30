@@ -7,7 +7,7 @@
 //   npx electron tools/phase-a-check.js <mapped-root> <unc-root>
 //   e.g. npx electron tools/phase-a-check.js Z:\ \\192.168.0.101\public
 //
-// It only touches files it creates: a dff-phase-a-<stamp> folder on the share
+// It only touches files it creates: a holdfast-phase-a-<stamp> folder on the share
 // and in %TEMP%. Everything is removed at the end, except one test file it
 // sends to the Windows Recycle Bin (step 8) — empty the bin to remove it.
 
@@ -30,7 +30,7 @@ if (!mappedRoot || !uncRoot) {
   process.exit(2);
 }
 
-const STAMP = `dff-phase-a-${Date.now()}`;
+const STAMP = `holdfast-phase-a-${Date.now()}`;
 const NAS = path.join(mappedRoot, STAMP);
 const NAS_UNC = path.join(uncRoot, STAMP);
 const LOCAL = path.join(os.tmpdir(), STAMP);
@@ -54,7 +54,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 function runScan(workerData) {
   return new Promise((resolve, reject) => {
     const w = new Worker(path.join(SRC, 'scanWorker.js'), {
-      workerData: { filters: {}, exclusions: [], cachePath: path.join(USERDATA, 'dff-signature-cache.json'), platform: process.platform, ...workerData },
+      workerData: { filters: {}, exclusions: [], cachePath: path.join(USERDATA, 'holdfast-signature-cache.json'), platform: process.platform, ...workerData },
     });
     w.on('message', (m) => {
       if (m.type === 'done') { resolve(m.result); w.terminate(); }
@@ -128,7 +128,7 @@ async function main() {
   const qb1 = q.find(e => e.originalPath === b1);
   check('3  NAS files quarantined, not recycled', d3.quarantined.length === 2 && d3.trashed.length === 0,
     `quarantined=${d3.quarantined.length} trashed=${d3.trashed.length} skipped=${JSON.stringify(d3.skipped)} failed=${JSON.stringify(d3.failed)}`);
-  check('3  quarantine folder is on the same drive', qa1 && path.dirname(qa1.quarantinePath).toLowerCase() === path.join(mappedRoot, '.dff-quarantine').toLowerCase(),
+  check('3  quarantine folder is on the same drive', qa1 && path.dirname(qa1.quarantinePath).toLowerCase() === path.join(mappedRoot, '.holdfast-quarantine').toLowerCase(),
     qa1 && qa1.quarantinePath);
   check('3  freed bytes counted', d3.freedBytes === content.A.length + content.B.length, `${d3.freedBytes}`);
 
@@ -188,7 +188,7 @@ async function cleanup(leftovers, ourQuarantinePaths = []) {
   const ours = new Set(ourQuarantinePaths);
   for (const p of leftovers) await fsp.rm(p, { force: true }).catch(() => {});
   // Remove the share's quarantine folder only if everything in it is ours.
-  const qdir = path.join(mappedRoot, '.dff-quarantine');
+  const qdir = path.join(mappedRoot, '.holdfast-quarantine');
   try {
     const entries = await fsp.readdir(qdir);
     const manifest = await fsp.readFile(path.join(qdir, 'manifest.jsonl'), 'utf8').catch(() => '');

@@ -85,7 +85,7 @@ export default function ScanView({ scanConfig, progress, startedAt, cancelling, 
 
   return (
     <div style={{ height: '100%', overflowY: 'auto' }}>
-      <style>{`@keyframes dff-spin { from { transform: rotate(-90deg); } to { transform: rotate(270deg); } }`}</style>
+      <style>{`@keyframes holdfast-spin { from { transform: rotate(-90deg); } to { transform: rotate(270deg); } }`}</style>
       <div style={{
         maxWidth: scale(680), margin: '0 auto', minHeight: '100%',
         padding: `${scale(36)}px ${scale(32)}px`,
@@ -106,7 +106,7 @@ export default function ScanView({ scanConfig, progress, startedAt, cancelling, 
               style={{
                 transformOrigin: '80px 80px',
                 transform: 'rotate(-90deg)',
-                animation: hasDeterminate ? 'none' : 'dff-spin 1.1s linear infinite',
+                animation: hasDeterminate ? 'none' : 'holdfast-spin 1.1s linear infinite',
                 transition: hasDeterminate ? 'stroke-dasharray 0.3s ease' : 'none',
               }}/>
           </svg>

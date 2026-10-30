@@ -7,7 +7,7 @@ const api = window.electronAPI;
 // Frameless-window toolbar. Left: sidebar toggle. Center: view title.
 // Right: window controls (kept — the window is frameless so these are the
 // only min/max/close affordances on Windows/Linux).
-export default function TitleBar({ title = 'Duplicate Files Fixer', onToggleSidebar }) {
+export default function TitleBar({ title = 'Holdfast', onToggleSidebar }) {
   const { scale } = useDPR();
 
   const winBtn = {

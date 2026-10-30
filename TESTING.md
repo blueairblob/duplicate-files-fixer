@@ -2,7 +2,7 @@
 
 A hands-on pass over everything changed in Phases A–D, using your own files. Allow about an hour. Work through it in order, and note anything that looks wrong, reads confusingly or feels slow. Odd wording counts too.
 
-**Safety first:** run every delete test against **copies**. Nothing is ever permanently deleted: files go to the Recycle Bin or to a `.dff-quarantine` folder on the same drive. Still, keep real originals in **Keep** folders (Find duplicates) or the **Original** box (Compare folders) until you trust the app.
+**Safety first:** run every delete test against **copies**. Nothing is ever permanently deleted: files go to the Recycle Bin or to a `.holdfast-quarantine` folder on the same drive. Still, keep real originals in **Keep** folders (Find duplicates) or the **Original** box (Compare folders) until you trust the app.
 
 ---
 
@@ -10,13 +10,13 @@ A hands-on pass over everything changed in Phases A–D, using your own files. A
 
 1. Start the app from **Windows PowerShell**, not WSL:
    ```powershell
-   cd D:\dev\PROJECTS\duplicate-files-fixer
+   cd D:\dev\PROJECTS\holdfast
    npm run dev
    ```
    The terminal should print `[perf] UV_THREADPOOL_SIZE = 64`.
 2. Pick a real photo folder of a few GB, ideally one that includes RAW files (`.cr2`, `.nef`, `.arw`, `.dng`). Copy it twice:
-   - `D:\dff-real\originals`, which plays the role of your originals;
-   - `Z:\dff-real\backup`, which plays the role of your NAS backup.
+   - `D:\holdfast-test\originals`, which plays the role of your originals;
+   - `Z:\holdfast-test\backup`, which plays the role of your NAS backup.
 3. Change the **backup** copy so there's something to find:
    - delete **3 files**, at least one of them a RAW file if you have any;
    - **rename** 1 file (same contents, new name);
@@ -35,7 +35,7 @@ Write down what you changed; the tests below check that the app finds it.
 
 ## 2. Compare folders: is everything backed up?
 
-1. Home → **Compare folders**. Original = `D:\dff-real\originals`, Copy = `Z:\dff-real\backup`.
+1. Home → **Compare folders**. Original = `D:\holdfast-test\originals`, Copy = `Z:\holdfast-test\backup`.
 2. Open **Scan options**. Match confidence should default to **Thorough**, marked Recommended. Click **Compare**.
 
 **Expect:**
@@ -58,7 +58,7 @@ Repeat test 2 with **Scan options → Standard**, then with **Quick**.
 
 ## 4. Find duplicates with a Keep folder
 
-1. Home → **Find duplicates**. Add `D:\dff-real\originals` and mark it **Keep**. Add `Z:\dff-real\backup` (not Keep).
+1. Home → **Find duplicates**. Add `D:\holdfast-test\originals` and mark it **Keep**. Add `Z:\holdfast-test\backup` (not Keep).
 2. Click **Find duplicates**.
 
 **Expect:**
@@ -72,8 +72,8 @@ Repeat test 2 with **Scan options → Standard**, then with **Quick**.
 1. From test 4's results, select about 10 files on `Z:`, then **Delete**.
 
 **Expect:**
-- [ ] The Done screen says the files went to a **.dff-quarantine folder on the same drive** (network drives have no Recycle Bin).
-- [ ] `Z:\.dff-quarantine` exists and holds them, along with a `manifest.jsonl`.
+- [ ] The Done screen says the files went to a **.holdfast-quarantine folder on the same drive** (network drives have no Recycle Bin).
+- [ ] `Z:\.holdfast-quarantine` exists and holds them, along with a `manifest.jsonl`.
 - [ ] **Space freed** matches what you deleted.
 - [ ] Sidebar → **Quarantine** lists them. **Restore** one, and it reappears at its original path.
 
@@ -89,9 +89,9 @@ Repeat test 2 with **Scan options → Standard**, then with **Quick**.
 
 ## 7. Safety refusals
 
-- [ ] Find duplicates: `Z:\dff-real` plus `Z:\dff-real\backup` marked **Keep** (the Keep folder is inside the other). The scan **runs**, and nothing under `backup` is deletable.
+- [ ] Find duplicates: `Z:\holdfast-test` plus `Z:\holdfast-test\backup` marked **Keep** (the Keep folder is inside the other). The scan **runs**, and nothing under `backup` is deletable.
 - [ ] Swap which one is Keep. The scan is **refused** with a red message explaining why.
-- [ ] Compare folders: Original = `\\192.168.0.101\public\dff-real`, Copy = `Z:\dff-real` (the same folder through two paths). The scan is **refused**.
+- [ ] Compare folders: Original = `\\192.168.0.101\public\holdfast-test`, Copy = `Z:\holdfast-test` (the same folder through two paths). The scan is **refused**.
 
 ## 8. Big scan, responsiveness
 
@@ -113,7 +113,7 @@ Note how many files were scanned and how long it took: ______
 
 - [ ] Sidebar → **Exclusions**: add `*.tmp`. Close the app and start it again, and it's still there.
 - [ ] The Home options summary shows the exclusion count.
-- [ ] A folder you own named `Windows` (say `D:\dff-real\Windows`) **is** scanned; only `C:\Windows` is skipped.
+- [ ] A folder you own named `Windows` (say `D:\holdfast-test\Windows`) **is** scanned; only `C:\Windows` is skipped.
 - [ ] **Settings → Scan cache** shows "N files remembered" after a scan. **Clear** empties it.
 - [ ] Scan options (types, size, confidence) are remembered after a restart, and Compare folders keeps its own confidence setting.
 
@@ -146,4 +146,4 @@ Test | Pass/Fail | Notes (what you saw, what you expected)
 Terminal output around any failure:
 ```
 
-Clean up afterwards: delete `D:\dff-real`, `Z:\dff-real` and `Z:\.dff-quarantine`, and empty the Recycle Bin.
+Clean up afterwards: delete `D:\holdfast-test`, `Z:\holdfast-test` and `Z:\.holdfast-quarantine`, and empty the Recycle Bin.

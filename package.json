@@ -1,7 +1,7 @@
 {
-  "name": "duplicate-files-fixer",
+  "name": "holdfast",
   "version": "0.1.0",
-  "description": "Duplicate Files Fixer - Desktop Prototype",
+  "description": "Holdfast - Desktop Prototype",
   "main": "src/main/main.js",
   "scripts": {
     "dev:renderer": "vite",
@@ -9,15 +9,15 @@
     "dev": "concurrently \"npm run dev:renderer\" \"wait-on http://localhost:5173 && npm run dev:electron\"",
     "test": "vitest run",
     "build:renderer": "vite build",
-    "smoke": "vite build && cross-env DFF_SMOKE=1 UV_THREADPOOL_SIZE=64 electron .",
+    "smoke": "vite build && cross-env HOLDFAST_SMOKE=1 UV_THREADPOOL_SIZE=64 electron .",
     "pack": "vite build && electron-builder --dir",
     "build": "vite build && electron-builder",
     "icon": "node tools/make-icon.js",
     "preview": "vite preview"
   },
   "build": {
-    "appId": "com.dff.prototype",
-    "productName": "Duplicate Files Fixer",
+    "appId": "com.blueairblob.holdfast",
+    "productName": "Holdfast",
     "directories": {
       "output": "release",
       "buildResources": "build"

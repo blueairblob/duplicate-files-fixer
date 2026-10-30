@@ -1,4 +1,4 @@
-# Duplicate Files Fixer — Roadmap
+# Holdfast — Roadmap
 
 `REVIEW.md` holds the full code review and the detail of each phase. This file is the short version: what's done, what's decided, and what's next.
 
@@ -24,7 +24,7 @@
 
 ## Next
 
-0. **Rename the app.** "Duplicate Files Fixer" is already a commercial Systweak product (Windows, Mac and Android). Pick a new name before any public release.
+0. **Name check before public release.** The app is now **Holdfast**; the old placeholder name clashed with a commercial product. A quick web search found no backup or file app called Holdfast, but before release check the UK/US trademark registers, the app stores and domain names.
 1. **Real-world test pass**: work through `TESTING.md` on real data and fix what it finds.
 2. **Donation link**: a "Support this app" button in Settings that opens a fixed Buy Me a Coffee page through the main process. Needs the page URL.
 3. **Release pipeline**:

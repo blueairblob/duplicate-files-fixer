@@ -31,6 +31,10 @@ const { shouldIncludeFile, sizeCandidates, buildGroups, buildCensus, censusProbl
 const PLATFORM = workerData.platform || process.platform;
 const ROOT_EXCLUDES = new Set(workerData.rootExcludes || []);
 
+// The app's own quarantine folders are never scanned, whatever the user's
+// exclusion list says (the second name is from before the Holdfast rename).
+const APP_DIRS = new Set(['.holdfast-quarantine', '.dff-quarantine']);
+
 // File identity (device + inode). One physical file reached through two paths
 // (overlapping roots, a mapped drive and its UNC path, a junction) must be
 // counted once — otherwise it looks like a duplicate of itself and "deleting
@@ -133,10 +137,10 @@ function emitProgress(payload, force = false) {
 // Prints [scan-perf] lines to the terminal. One scan gives a full timing
 // picture: effective pool width, thread pool size, per-phase rate and avg
 // per-op latency — enough to pinpoint any serialization without guessing.
-// Verbose tracing is opt-in: `set DFF_PERF=1` (PowerShell: $env:DFF_PERF=1)
+// Verbose tracing is opt-in: `set HOLDFAST_PERF=1` (PowerShell: $env:HOLDFAST_PERF=1)
 // before `npm run dev`. It found the NAS boundary-hash bottleneck; leaving it
 // on by default buries real errors under thousands of lines per scan.
-const PERF_VERBOSE = process.env.DFF_PERF === '1';
+const PERF_VERBOSE = process.env.HOLDFAST_PERF === '1';
 
 const perf = { phase: null, t0: 0, ops: 0, phases: [] };
 function perfPhase(name, plannedOps) {
@@ -317,6 +321,7 @@ async function walkRoots(roots, label, filters, allFiles, warnings, counter) {
       const fullPath = path.join(dir, entry.name);
       if (isExcluded(fullPath, EXCLUSIONS, root)) continue;
       if (entry.isDirectory()) {
+        if (APP_DIRS.has(entry.name.toLowerCase())) continue;
         if (label === 'target' && ROOT_EXCLUDES.has(normaliseRoot(fullPath, PLATFORM))) continue;
         queue.push({ dir: fullPath, root });
       } else if (entry.isFile() && shouldIncludeFile(fullPath, filters)) {
