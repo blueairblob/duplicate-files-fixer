@@ -2,7 +2,7 @@
 
 A hands-on pass over everything changed in Phases A–D, using your own files. Allow about an hour. Work through it in order, and note anything that looks wrong, reads confusingly or feels slow. Odd wording counts too.
 
-**Safety first:** run every delete test against **copies**. Nothing is ever permanently deleted: files go to the Recycle Bin or to a `.dff-quarantine` folder on the same drive. Still, keep the real originals out of the "Scan target" box until you trust the app.
+**Safety first:** run every delete test against **copies**. Nothing is ever permanently deleted: files go to the Recycle Bin or to a `.holdfast-quarantine` folder on the same drive. Still, keep real originals in **Keep** folders (Find duplicates) or the **Original** box (Check a backup) until you trust the app.
 
 ---
 
@@ -10,13 +10,13 @@ A hands-on pass over everything changed in Phases A–D, using your own files. A
 
 1. Start the app from **Windows PowerShell**, not WSL:
    ```powershell
-   cd D:\dev\PROJECTS\duplicate-files-fixer
+   cd D:\dev\PROJECTS\holdfast
    npm run dev
    ```
    The terminal should print `[perf] UV_THREADPOOL_SIZE = 64`.
 2. Pick a real photo folder of a few GB, ideally one that includes RAW files (`.cr2`, `.nef`, `.arw`, `.dng`). Copy it twice:
-   - `D:\dff-real\originals`, which plays the role of your originals;
-   - `Z:\dff-real\backup`, which plays the role of your NAS backup.
+   - `D:\holdfast-test\originals`, which plays the role of your originals;
+   - `Z:\holdfast-test\backup`, which plays the role of your NAS backup.
 3. Change the **backup** copy so there's something to find:
    - delete **3 files**, at least one of them a RAW file if you have any;
    - **rename** 1 file (same contents, new name);
@@ -27,59 +27,92 @@ Write down what you changed; the tests below check that the app finds it.
 
 ---
 
-## 1. Verify: is everything backed up?
+## 1. Home: three jobs
 
-1. Home → **Verify backup**. Source = `D:\dff-real\originals`, Backup = `Z:\dff-real\backup`.
-2. Open **Scan options**. Match confidence should default to **Thorough**, marked Recommended. Start the scan.
+- [ ] Home offers five numbered stages: **Import**, **Move to backup**, **Check**, **Clean up**, **Archive**.
+- [ ] In Find duplicates, each folder row has a **Keep** switch. A kept folder shows a shield and tinted row.
+- [ ] Marking every folder Keep disables the start button and explains why.
+
+## 1a. Import from device (SD card, camera or USB drive)
+
+1. Put an SD card (or a USB stick with some photos in `DCIM`) in the PC.
+2. Home → **Import**. The card should appear under **Connected**; click it to fill in **Device**. Set **Inbox** = `D:\holdfast-test\phone`, and optionally **Your backup** = `Z:\holdfast-test\backup`. Click **See what's new**.
 
 **Expect:**
-- [ ] The headline says **"⚠ 4 source files are not in the backup"**: the 3 deleted plus the edited one, since its contents changed.
-- [ ] **Missing from the backup** lists exactly those 4 files, RAW files included.
-- [ ] The **renamed** file counts as backed up (same contents, different name).
-- [ ] **Only in the backup** shows your added file (and the edited version).
-- [ ] The sentence under the title names the right two folders.
+- [ ] Only photos not already in the Inbox (or the backup) are listed as new.
+- [ ] **Import N files** copies and verifies them into `Inbox\YYYY\MM`.
+- [ ] Nothing on the card changes, and there's no "Free up" offer.
+- [ ] Running it again finds nothing new.
+
+## 1b. Move to backup: phone copy → NAS
+
+1. Copy some photos from your phone to `D:\holdfast-test\phone`. Add a few that are already in `Z:\holdfast-test\backup`, and a re-import such as `IMG_1234 (1).HEIC`.
+2. Home → **Move to backup**. From = `D:\holdfast-test\phone`, To = `Z:\holdfast-test\backup`. Click **See what's new**.
+
+**Expect:**
+- [ ] "N new files to copy" counts only files the backup doesn't have anywhere. The re-import and the already-backed-up photos are under **Already in the backup**, next to their backup copy.
+- [ ] **Will be copied to** shows `Z:\holdfast-test\backup\YYYY\MM\…`. **Same folders** switches the preview.
+- [ ] **Copy N files to backup** shows progress and **Stop**, then "✓ N copied and verified". The files exist on the NAS with their original dates.
+- [ ] Nothing in the backup was overwritten. A different file with the same name was saved as `name (2).ext`.
+- [ ] **Free up space…** asks first, then removes the local copies to the Recycle Bin and shows the Done screen.
+
+## 2. Check backup: is everything backed up?
+
+1. Home → **Check**. Original = `D:\holdfast-test\originals`, Copy = `Z:\holdfast-test\backup`.
+2. Open **Scan options**. Match confidence should default to **Thorough**, marked Recommended. Click **Compare**.
+
+**Expect:**
+- [ ] The verdict at the top says **"⚠ 4 Original files are missing from the Copy"**: the 3 deleted plus the edited one, since its contents changed.
+- [ ] **Show missing files** (or the **Only in Original** box) lists exactly those 4, RAW files included.
+- [ ] The **renamed** file appears under **In both**, next to its "Same file in Original".
+- [ ] **Only in Copy** shows your added file (and the edited version).
+- [ ] The bar segments and boxes switch the list. The chosen one is highlighted, and the list title says what you're looking at.
+- [ ] Column headers sort the list, and the footer stays visible while you scroll.
+- [ ] **By folder** shows the folder table. Tick a folder, then **Review N selected**, and Results opens with only those files ticked. **Back to Compare** returns to the same list.
 
 Note how long the scan took: ______
 
-## 2. Verify, Standard match
+## 3. Check backup, Standard and Quick match
 
-Repeat test 1 with **Scan options → Standard**.
+Repeat test 2 with **Scan options → Standard**, then with **Quick**.
 
-- [ ] The card says **"Likely backed up"**, not "Backed up".
-- [ ] A note explains that only the first 64 KB were compared.
+- [ ] Standard: the verdict notes that only the first 64 KB were compared.
+- [ ] Quick: the wording changes to name/size matches, **Only in Copy** is greyed out, and a note explains why.
 
-## 3. Compare, Standard match
+## 4. Clean up duplicates with a Keep folder
 
-1. Home → **Compare locations**. Protected source = `D:\dff-real\originals`, Scan target = `Z:\dff-real\backup`.
+1. Home → **Clean up**. Add `D:\holdfast-test\originals` and mark it **Keep**. Add `Z:\holdfast-test\backup` (not Keep).
+2. Click **Find duplicates**.
 
 **Expect:**
-- [ ] The bar and tiles (**Only in source / Duplicates in target / Only in target**) match your changes and add up to the totals at the top.
-- [ ] **Folders in the target**: partly matched folders show "X of Y in source", plus how many are not in source and the space you'd free.
-- [ ] Tick one folder, then **Review N selected files**. Results opens scoped to that folder, with **only** its matched files ticked.
-- [ ] In that scoped view, **Auto-select duplicates** doesn't tick files in other folders.
-- [ ] No file from `originals` can ever be ticked; it shows a shield instead.
+- [ ] Results opens straight away, with no Compare summary.
+- [ ] Files in the Keep folder show a shield ("Keep folder") and can't be ticked.
+- [ ] The copies in the backup are pre-ticked.
+- [ ] Without any Keep folder, the newest copy in each group is kept by default; change this under Scan options.
 
-## 4. Compare, Quick match
+## 4b. Archive backup and re-check
 
-Repeat test 3 with **Scan options → Quick**.
+1. Home → **Archive**. Backup = `Z:\holdfast-test\backup`, Archive = a folder on another drive, e.g. `D:\holdfast-test\archive` or a USB disk. Click **See what to archive**.
 
-- [ ] The wording changes to **"name matches"** and "with a same-name match".
-- [ ] The **Only in target** tile is greyed out with "needs a standard scan".
-- [ ] A note explains that Quick only compares names and sizes.
+**Expect:**
+- [ ] **Archive N files** mirrors the backup's folders into the archive and verifies each copy.
+- [ ] It then writes the integrity record (`holdfast-integrity.jsonl` in the archive).
+- [ ] Back on the Archive page, **Re-check an archive** → choose the archive → **Re-check** reports "All N recorded files are intact".
+- [ ] Edit one archived photo and re-check: it shows under **Changed**. Delete one: **Missing**.
 
 ## 5. Delete from the NAS, then restore
 
-1. From test 3's results, select about 10 files in the **target** (`Z:`), then **Delete**.
+1. From test 4's results, select about 10 files on `Z:`, then **Delete**.
 
 **Expect:**
-- [ ] The Done screen says the files went to a **.dff-quarantine folder on the same drive** (network drives have no Recycle Bin).
-- [ ] `Z:\.dff-quarantine` exists and holds them, along with a `manifest.jsonl`.
+- [ ] The Done screen says the files went to a **.holdfast-quarantine folder on the same drive** (network drives have no Recycle Bin).
+- [ ] `Z:\.holdfast-quarantine` exists and holds them, along with a `manifest.jsonl`.
 - [ ] **Space freed** matches what you deleted.
 - [ ] Sidebar → **Quarantine** lists them. **Restore** one, and it reappears at its original path.
 
 ## 6. Stop a delete part-way
 
-1. Run a Simple scan on a folder with a few hundred duplicates (copies!). Select all, then **Delete**.
+1. **Find duplicates** on a folder with a few hundred duplicates (copies!). Select all, then **Delete**.
 2. Within a couple of seconds, click **Stop deleting**.
 
 **Expect:**
@@ -89,13 +122,13 @@ Repeat test 3 with **Scan options → Quick**.
 
 ## 7. Safety refusals
 
-- [ ] Protected source = `Z:\dff-real\backup`, Scan target = `Z:\dff-real` (the target contains the protected folder). The scan **runs**, and nothing under `backup` is deletable.
-- [ ] Swap them (the target is inside the protected folder). The scan is **refused** with a red message on Home.
-- [ ] Protected source = `\\192.168.0.101\public\dff-real`, Scan target = `Z:\dff-real` (the same folder through two paths). The scan is **refused**.
+- [ ] Find duplicates: `Z:\holdfast-test` plus `Z:\holdfast-test\backup` marked **Keep** (the Keep folder is inside the other). The scan **runs**, and nothing under `backup` is deletable.
+- [ ] Swap which one is Keep. The scan is **refused** with a red message explaining why.
+- [ ] Check a backup: Original = `\\192.168.0.101\public\holdfast-test`, Copy = `Z:\holdfast-test` (the same folder through two paths). The scan is **refused**.
 
 ## 8. Big scan, responsiveness
 
-Run a **Simple scan** on a large folder, such as your whole photo library (scanning only reads files).
+Run **Find duplicates** on a large folder, such as your whole photo library (scanning only reads files).
 
 - [ ] The window stays responsive during the scan, and you can switch sidebar sections and come back.
 - [ ] Results start **collapsed** when there are many groups, and show **"Show 200 more…"** at the bottom.
@@ -113,9 +146,9 @@ Note how many files were scanned and how long it took: ______
 
 - [ ] Sidebar → **Exclusions**: add `*.tmp`. Close the app and start it again, and it's still there.
 - [ ] The Home options summary shows the exclusion count.
-- [ ] A folder you own named `Windows` (say `D:\dff-real\Windows`) **is** scanned; only `C:\Windows` is skipped.
+- [ ] A folder you own named `Windows` (say `D:\holdfast-test\Windows`) **is** scanned; only `C:\Windows` is skipped.
 - [ ] **Settings → Scan cache** shows "N files remembered" after a scan. **Clear** empties it.
-- [ ] Scan options (types, size, confidence) are remembered after a restart, and Verify keeps its own confidence setting.
+- [ ] Scan options (types, size, confidence) are remembered after a restart, and Check a backup keeps its own confidence setting.
 
 ## 11. Odds and ends
 
@@ -146,4 +179,4 @@ Test | Pass/Fail | Notes (what you saw, what you expected)
 Terminal output around any failure:
 ```
 
-Clean up afterwards: delete `D:\dff-real`, `Z:\dff-real` and `Z:\.dff-quarantine`, and empty the Recycle Bin.
+Clean up afterwards: delete `D:\holdfast-test`, `Z:\holdfast-test` and `Z:\.holdfast-quarantine`, and empty the Recycle Bin.

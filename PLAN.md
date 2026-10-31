@@ -1,4 +1,4 @@
-# Duplicate Files Fixer — Roadmap
+# Holdfast — Roadmap
 
 `REVIEW.md` holds the full code review and the detail of each phase. This file is the short version: what's done, what's decided, and what's next.
 
@@ -12,6 +12,7 @@
 | C — speed and scale | Parallel folder walk (≈3.5× on NAS); no blocking main-process I/O; cancellable pooled deletes; paginated Results; exclusions fixed and persisted |
 | D — ship-ready | Sandbox, CSP, navigation/IPC guards; packaged build with icon; smoke-test mode; CI on Windows/macOS/Linux |
 | E — polish | Self-test drives the real IPC path (found and fixed a delete-guard bug); accessibility pass; OS-native HiDPI scaling |
+| F — jobs and name | Renamed to **Holdfast** (data migrated from the placeholder name). Five stages: **Import from device** (drives), then **Move to backup** (device copy → NAS: copy only what's new, verify every copy, then free up space), **Check backup** (Original vs Copy, verdict first; Verify mode folded in), **Clean up duplicates** (per-folder Keep), **Archive backup** (verified mirror + integrity record, re-checkable for damage). Compare list panel with sortable columns |
 
 ## Decisions (2026-10-28)
 
@@ -23,12 +24,15 @@
 
 ## Next
 
-1. **Real-world test pass**: work through `TESTING.md` on real data and fix what it finds.
-2. **Donation link**: a "Support this app" button in Settings that opens a fixed Buy Me a Coffee page through the main process. Needs the page URL.
-3. **Release pipeline**:
+0. **Name check before public release.** The app is now **Holdfast**; the old placeholder name clashed with a commercial product. A quick web search found no backup or file app called Holdfast, but before release check the UK/US trademark registers, the app stores and domain names.
+1. **Read photo dates from EXIF.** Move to backup's Year/Month uses the file date today, which some phone exports set to the export time.
+2. **Import from phones.** Windows exposes phones as devices (MTP), not drives. Next step: run `tools/probe-phone.ps1` with an iPhone and an Android phone connected; if their DCIM is reachable through the Windows Shell, build a phone source for Import.
+3. **Real-world test pass**: work through `TESTING.md` on real data and fix what it finds.
+4. **Donation link**: a "Support this app" button in Settings that opens a fixed Buy Me a Coffee page through the main process. Needs the page URL.
+5. **Release pipeline**:
    - pushing a `v*` tag makes CI build the installers for each platform and attach them to a GitHub Release;
    - Windows auto-update via `electron-updater` from those releases (macOS auto-update needs signing).
-4. **Code signing**, when it's back on the table:
+6. **Code signing**, when it's back on the table:
    - Windows: an OV/EV certificate in the electron-builder config.
    - macOS: Apple Developer Program plus notarisation.
 

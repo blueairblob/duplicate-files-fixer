@@ -29,12 +29,12 @@ Severity:
 - This is the core promise of Verify mode.
 
 **C2. "Permanent delete" is the normal path on WSL/Linux, and may be on Windows network drives.**
-- In `main.js:545-571`, if `shell.trashItem` fails, the code tries `renameSync` into `~/.dff-quarantine`. If that fails too, it calls `unlinkSync`.
+- In `main.js:545-571`, if `shell.trashItem` fails, the code tries `renameSync` into `~/.holdfast-quarantine`. If that fails too, it calls `unlinkSync`.
 - A rename across filesystems always fails with `EXDEV`. Any file on `/mnt/c`, `/mnt/d`, a NAS mount or a USB drive is on a different device from `~`. On WSL, where trash also fails, every delete is therefore permanent.
 - These files are reported as `deleted`, not as permanently removed. `DoneView.jsx:126` then tells the user they are in the Recycle Bin and "you can still recover them".
 - **Needs testing on Windows:** whether `trashItem` on an SMB/mapped drive with no Recycle Bin also deletes permanently without a prompt. Deleting duplicates on the NAS target is the main use case.
 - **Fix:**
-  - Fall back to a copy, then fsync, then unlink into a quarantine folder on the same volume (for example `<root>/.dff-quarantine`).
+  - Fall back to a copy, then fsync, then unlink into a quarantine folder on the same volume (for example `<root>/.holdfast-quarantine`).
   - Never `unlink` silently.
   - Report permanent deletes separately, and require explicit consent before any happen.
 
@@ -173,7 +173,7 @@ Order: data safety first, then correctness, then scale. Each phase can ship on i
    - groups left with no survivor unless explicitly flagged.
 2. **File identity (C3).** Record `dev`/`ino` (and the `realpath` of each root) in the walk. Dedupe on identity. Block deletes where the file and its counterpart are the same.
 3. **Root validation (C4).** At scan start, reject protected/target overlap, and the same root resolving under two paths. Show a clear message on the Home screen.
-4. **Quarantine on the same volume (C2).** Use per-volume `.dff-quarantine` with an atomic, batched manifest (H6). On cross-device moves, copy, verify the hash, then unlink. Never silently `unlink`. Permanent delete becomes an explicit, separately confirmed option.
+4. **Quarantine on the same volume (C2).** Use per-volume `.holdfast-quarantine` with an atomic, batched manifest (H6). On cross-device moves, copy, verify the hash, then unlink. Never silently `unlink`. Permanent delete becomes an explicit, separately confirmed option.
 5. **Check before every delete (H2).** Before each delete, `stat` both files and compare against the scan; for Quick/Standard also full-hash.
 6. **Honest Done screen (H7).** Show trashed, quarantined, permanently deleted, skipped and failed separately, and compute freed bytes from what was actually removed.
 7. **Tests for all of the above.** Run real `main.js` logic (extract delete and quarantine into a module that doesn't depend on Electron) against temp dirs, including EXDEV simulation, alias paths and overlapping roots.
@@ -222,7 +222,7 @@ What "technical success" should mean for this tool, and how to measure it:
 - A backup verifier that says "all good" must have read every byte, or say plainly that it didn't.
 
 **3. Performance budgets, measured.**
-- Turn `tools/bench-smb.js` and `DFF_PERF` into a repeatable benchmark with fixture trees: local SSD, many small folders, and a simulated high-latency share.
+- Turn `tools/bench-smb.js` and `HOLDFAST_PERF` into a repeatable benchmark with fixture trees: local SSD, many small folders, and a simulated high-latency share.
 - Track files/s for walk, boundary hash and full hash, plus peak memory, in CI.
 - Targets:
   - repeat scans at walk speed (cache),
@@ -262,11 +262,11 @@ Phase B fixes are still open, including **C1** (Verify direction) and **C5** (fi
 
 These checks need a real Windows desktop and NAS, and can't be automated. Use a throwaway NAS folder with copied files only. Start the app with `npm run dev` from a Windows terminal.
 
-1. **Mapped drive vs UNC (C3).** Compare with protected `\\nas\share\dff-test` and target `Z:\dff-test` (the same folder through the mapped drive). Expected: the scan is refused with "the same folder".
-2. **Overlap (C4).** Use protected `Z:\dff-test\keep` and target `Z:\dff-test`. Expected: the scan runs, and no file under `keep` appears as deletable. Then swap the two. Expected: the scan is refused.
-3. **NAS delete goes to quarantine (C2).** Compare a local folder against `Z:\dff-test\dupes` and delete a few duplicates. Expected:
-   - the Done screen says they were moved to a `.dff-quarantine` folder;
-   - `Z:\.dff-quarantine` contains the files and a `manifest.jsonl`.
+1. **Mapped drive vs UNC (C3).** Compare with protected `\\nas\share\holdfast-test` and target `Z:\holdfast-test` (the same folder through the mapped drive). Expected: the scan is refused with "the same folder".
+2. **Overlap (C4).** Use protected `Z:\holdfast-test\keep` and target `Z:\holdfast-test`. Expected: the scan runs, and no file under `keep` appears as deletable. Then swap the two. Expected: the scan is refused.
+3. **NAS delete goes to quarantine (C2).** Compare a local folder against `Z:\holdfast-test\dupes` and delete a few duplicates. Expected:
+   - the Done screen says they were moved to a `.holdfast-quarantine` folder;
+   - `Z:\.holdfast-quarantine` contains the files and a `manifest.jsonl`.
 4. **Restore.** Open Quarantine in the sidebar and restore one file. Expected: it reappears at its original path.
 5. **Changed since scan (H2).** Scan, then edit one target duplicate in another app (so its mtime changes), then delete it. Expected: "File changed since the scan — not deleted".
 6. **Kept copy gone (H2).** Scan, then rename the protected copy, then delete its duplicate. Expected: "The kept copy is missing — not deleted".
@@ -278,7 +278,7 @@ These checks need a real Windows desktop and NAS, and can't be automated. Use a 
 `npx electron tools/phase-a-check.js Z:\ \\192.168.0.101\public` passed all 13 checks against the real share and the Windows Recycle Bin. That covers steps 1–8 above, except the Delete button state in step 7; the guard logic behind that button is covered.
 
 Things learned on the real share:
-- **`shell.trashItem` refuses network files** ("Failed to perform delete operation") and leaves them in place. The old code then tried to rename the file into `C:\Users\…\.dff-quarantine`, which fails across drives, and fell through to `unlinkSync`. **Before Phase A, every NAS delete on Windows was permanent.** This confirms C2.
+- **`shell.trashItem` refuses network files** ("Failed to perform delete operation") and leaves them in place. The old code then tried to rename the file into `C:\Users\…\.holdfast-quarantine`, which fails across drives, and fell through to `unlinkSync`. **Before Phase A, every NAS delete on Windows was permanent.** This confirms C2.
 - **File identity works on this SMB share.** The mapped `Z:` path and the UNC path report the same `dev:ino`, so the identity dedupe also catches aliases the root check might miss.
 - **The SMB client caches timestamps for about 10 seconds** (`FileInfoCacheLifetime`). A file edited moments before a delete can still show its old mtime. Below Thorough, the content hash catches the edit. In Thorough mode, a same-size edit made in the last ~10 s before deleting the file would not be caught, but the file still goes to quarantine and can be restored. Consider always hashing network files at delete time (Phase C).
 
@@ -344,7 +344,7 @@ Done on branch `phase-d-ship`:
   - `src/main` is unpacked from asar, so the worker loads in packaged builds.
   - dmg and AppImage targets added.
   - Verified on Windows: the packaged app passes the smoke test, and the NSIS installer builds (unsigned).
-- **Smoke mode:** `DFF_SMOKE=1` and `tools/run-smoke.js` check, without showing a window, that the page renders under the sandbox and CSP, the preload bridge works, Node is hidden from the page, and the worker finds a duplicate.
+- **Smoke mode:** `HOLDFAST_SMOKE=1` and `tools/run-smoke.js` check, without showing a window, that the page renders under the sandbox and CSP, the preload bridge works, Node is hidden from the page, and the worker finds a duplicate.
 - **CI:** `.github/workflows/ci.yml` runs tests, a package and the smoke test on Windows, macOS and Linux. **It has not run yet**; it starts on the first push to GitHub.
 - **Low items:**
   - A superseded scan's promise now resolves.

@@ -48,8 +48,8 @@ export function makeScale(dpr) {
 // scale() is 1:1. The old behaviour — shrinking text further on HiDPI screens —
 // is kept as an opt-in "legacy" setting (Settings → Display) in case OS
 // scaling looks wrong somewhere.
-const LEGACY_KEY = 'dff-legacy-dpr-scaling';
-const LEGACY_EVENT = 'dff-legacy-dpr-scaling-change';
+const LEGACY_KEY = 'holdfast-legacy-dpr-scaling';
+const LEGACY_EVENT = 'holdfast-legacy-dpr-scaling-change';
 
 export function getLegacyScaling() {
   try { return localStorage.getItem(LEGACY_KEY) === '1'; } catch { return false; }

@@ -20,7 +20,7 @@ if (!parent) {
 const FOLDERS = Number(foldersArg) || 1500;
 const PER = Number(perArg) || 4;
 const WORKER = path.resolve(workerArg || path.join(__dirname, '..', 'src', 'main', 'scanWorker.js'));
-const root = path.join(parent, `dff-bench-walk-${Date.now()}`);
+const root = path.join(parent, `holdfast-bench-walk-${Date.now()}`);
 
 function scan() {
   return new Promise((resolve, reject) => {

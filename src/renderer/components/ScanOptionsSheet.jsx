@@ -20,9 +20,9 @@ const SIZE_OPTIONS = [
 ];
 
 // Plain-language framing of the auto-mark rules. IDs match the scan engine.
+// A copy in a Keep folder always wins; these decide the rest.
 const KEEP_RULES = [
-  { id: 'protected-wins', label: 'The protected copy', recommended: true },
-  { id: 'keep-newest',    label: 'The newest copy' },
+  { id: 'keep-newest',    label: 'The newest copy', recommended: true },
   { id: 'keep-oldest',    label: 'The oldest copy' },
   { id: 'keep-largest',   label: 'The largest copy' },
 ];
@@ -73,9 +73,9 @@ export default function ScanOptionsSheet({
 
         <div style={{ padding: scale(18) }}>
 
-          {mode === 'compare' && (
+          {mode === 'find' && (
             <>
-              <p style={sectionTitle}>When duplicates are found, keep</p>
+              <p style={sectionTitle}>When no Keep folder has a copy, keep</p>
               <div style={{
                 border: '1px solid var(--border)', borderRadius: 'var(--radius-md)',
                 overflow: 'hidden', marginBottom: scale(20),
@@ -113,11 +113,17 @@ export default function ScanOptionsSheet({
           )}
 
           <p style={sectionTitle}>Match confidence</p>
+          {mode === 'move' ? (
+            <p style={{ fontSize: 'var(--fs-caption)', color: 'var(--text-secondary)', lineHeight: 1.5, marginBottom: scale(20) }}>
+              Move to backup always compares every byte. A file is only skipped, or later removed from the local copy, when
+              it's proven identical to a file in the backup.
+            </p>
+          ) : (<>
           <div style={{
             border: '1px solid var(--border)', borderRadius: 'var(--radius-md)',
             overflow: 'hidden', marginBottom: scale(20),
           }}>
-            {(mode === 'verify'
+            {(mode === 'compare'
               // A backup check is only as good as what it reads.
               ? [
                   { id: 'quick',    label: 'Quick',    hint: 'Name and size only — not proof of a backup' },
@@ -163,6 +169,7 @@ export default function ScanOptionsSheet({
               );
             })}
           </div>
+          </>)}
 
           <p style={sectionTitle}>File types</p>
           <div style={{ display: 'flex', gap: scale(6), flexWrap: 'wrap', marginBottom: scale(20) }}>

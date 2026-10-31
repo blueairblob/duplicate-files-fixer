@@ -87,7 +87,7 @@ describe('DEFAULT_EXCLUSIONS', () => {
     expect(DEFAULT_EXCLUSIONS).toContain('.git');
   });
   it('includes the quarantine folder itself to avoid re-scanning deleted files', () => {
-    expect(DEFAULT_EXCLUSIONS).toContain('.dff-quarantine');
+    expect(DEFAULT_EXCLUSIONS).toContain('.holdfast-quarantine');
   });
   it('includes Windows system folders', () => {
     expect(DEFAULT_EXCLUSIONS).toContain('System Volume Information');

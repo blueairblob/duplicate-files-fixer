@@ -27,7 +27,7 @@ const write = (rel, content) => {
   return p;
 };
 
-beforeEach(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dff-worker-')); });
+beforeEach(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'holdfast-worker-')); });
 afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
 
 const allPaths = (result) => result.groups.flatMap(g => g.files.map(f => f.path));
@@ -51,15 +51,15 @@ describe('scanWorker (real worker thread)', () => {
     expect(r.warnings.some(w => /more than one path/.test(w.reason))).toBe(true);
   });
 
-  it('verify mode reports source files missing from the backup', async () => {
+  it('compare mode lists Original files missing from the Copy', async () => {
     write('src/kept.jpg', 'kept');
     write('src/lost.cr2', 'raw photo never copied');
     write('backup/kept-copy.jpg', 'kept');
     write('backup/extra.txt', 'only in backup');
-    const r = await runScan({ mode: 'verify', protectedFolders: [path.join(tmp, 'src')], targetFolders: [path.join(tmp, 'backup')], confidence: 'thorough' });
-    expect(r.verifyReport.missing.map(f => path.basename(f.path))).toEqual(['lost.cr2']);
-    expect(r.verifyReport.backedUp).toHaveLength(1);
-    expect(r.verifyReport.backupOnly.map(f => path.basename(f.path))).toEqual(['extra.txt']);
+    const r = await runScan({ mode: 'compare', protectedFolders: [path.join(tmp, 'src')], targetFolders: [path.join(tmp, 'backup')], confidence: 'thorough' });
+    expect(r.census.sourceOnly.list.map(f => path.basename(f.path))).toEqual(['lost.cr2']);
+    expect(r.census.matched.targetFiles).toBe(1);
+    expect(r.census.targetOnly.list.map(f => path.basename(f.path))).toEqual(['extra.txt']);
   });
 
   it('scans file types outside the old allowlist (RAW, TIFF, no extension)', async () => {

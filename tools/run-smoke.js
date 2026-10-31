@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// run-smoke.js — runs a packaged build in smoke mode (DFF_SMOKE=1) and checks
+// run-smoke.js — runs a packaged build in smoke mode (HOLDFAST_SMOKE=1) and checks
 // its report. Finds the executable under release/ when no path is given.
 //
 //   node tools/run-smoke.js [path-to-executable] [-- extra electron args]
 //
-// DFF_RELEASE_DIR overrides where to look (default: release/).
+// HOLDFAST_RELEASE_DIR overrides where to look (default: release/).
 //
 // Exit code 0 = the packaged page rendered under sandbox + CSP and a real scan
 // found the expected duplicate. See runSmoke() in src/main/main.js.
@@ -19,12 +19,12 @@ const extraArgs = sep >= 0 ? process.argv.slice(sep + 1) : [];
 let exe = sep === 2 ? null : process.argv[2];
 
 function findExecutable() {
-  const release = process.env.DFF_RELEASE_DIR || path.join(__dirname, '..', 'release');
+  const release = process.env.HOLDFAST_RELEASE_DIR || path.join(__dirname, '..', 'release');
   const dirs = fs.existsSync(release) ? fs.readdirSync(release) : [];
   for (const d of dirs) {
     const full = path.join(release, d);
-    if (d === 'win-unpacked') return path.join(full, 'Duplicate Files Fixer.exe');
-    if (d === 'linux-unpacked') return path.join(full, 'duplicate-files-fixer');
+    if (d === 'win-unpacked') return path.join(full, 'Holdfast.exe');
+    if (d === 'linux-unpacked') return path.join(full, 'holdfast');
     if (d.startsWith('mac')) {
       const app = fs.readdirSync(full).find(f => f.endsWith('.app'));
       if (app) return path.join(full, app, 'Contents', 'MacOS', app.replace(/\.app$/, ''));
@@ -39,12 +39,12 @@ if (!exe || !fs.existsSync(exe)) {
   process.exit(2);
 }
 
-const out = path.join(os.tmpdir(), `dff-smoke-${process.pid}.json`);
+const out = path.join(os.tmpdir(), `holdfast-smoke-${process.pid}.json`);
 fs.rmSync(out, { force: true });
 console.log(`run-smoke: ${exe} ${extraArgs.join(' ')}`);
 
 const child = spawn(exe, extraArgs, {
-  env: { ...process.env, DFF_SMOKE: '1', UV_THREADPOOL_SIZE: '64', DFF_SMOKE_OUT: out },
+  env: { ...process.env, HOLDFAST_SMOKE: '1', UV_THREADPOOL_SIZE: '64', HOLDFAST_SMOKE_OUT: out },
   stdio: 'inherit',
 });
 const timer = setTimeout(() => { console.error('run-smoke: timed out after 120 s'); child.kill('SIGKILL'); }, 120000);

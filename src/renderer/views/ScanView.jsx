@@ -16,7 +16,10 @@ function formatDuration(ms) {
 // so this view can unmount/remount freely while the scan continues.
 export default function ScanView({ scanConfig, progress, startedAt, cancelling, onCancel }) {
   const { scale } = useDPR();
-  const { mode, protectedFolders = [], targetFolders = [], filters = {}, autoMarkRule, includeEmpty } = scanConfig || {};
+  const { mode, job, protectedFolders = [], targetFolders = [], filters = {}, autoMarkRule, includeEmpty } = scanConfig || {};
+  const isCompareJob = job ? job === 'compare' : mode === 'compare';
+  const isMoveJob = job === 'move';
+  const sideLabels = { import: ['Inbox / backup', 'Device'], archive: ['Archive', 'Backup'] }[job];
 
   const { scanned = 0, phase = 'walking', total = 0, currentPath = '' } = progress || {};
 
@@ -84,7 +87,7 @@ export default function ScanView({ scanConfig, progress, startedAt, cancelling, 
 
   return (
     <div style={{ height: '100%', overflowY: 'auto' }}>
-      <style>{`@keyframes dff-spin { from { transform: rotate(-90deg); } to { transform: rotate(270deg); } }`}</style>
+      <style>{`@keyframes holdfast-spin { from { transform: rotate(-90deg); } to { transform: rotate(270deg); } }`}</style>
       <div style={{
         maxWidth: scale(680), margin: '0 auto', minHeight: '100%',
         padding: `${scale(36)}px ${scale(32)}px`,
@@ -105,7 +108,7 @@ export default function ScanView({ scanConfig, progress, startedAt, cancelling, 
               style={{
                 transformOrigin: '80px 80px',
                 transform: 'rotate(-90deg)',
-                animation: hasDeterminate ? 'none' : 'dff-spin 1.1s linear infinite',
+                animation: hasDeterminate ? 'none' : 'holdfast-spin 1.1s linear infinite',
                 transition: hasDeterminate ? 'stroke-dasharray 0.3s ease' : 'none',
               }}/>
           </svg>
@@ -170,12 +173,12 @@ export default function ScanView({ scanConfig, progress, startedAt, cancelling, 
           width: '100%', display: 'flex', flexDirection: 'column', gap: scale(10),
         }}>
           {mode === 'compare' && protectedFolders.length > 0 && (
-            <FolderGroup label="Protected source" Icon={ShieldIcon} color="var(--accent)" folders={protectedFolders} scale={scale} />
+            <FolderGroup label={sideLabels ? sideLabels[0] : isMoveJob ? 'Backup' : isCompareJob ? 'Original' : 'Keep'} Icon={ShieldIcon} color="var(--accent)" folders={protectedFolders} scale={scale} />
           )}
           <FolderGroup
-            label={mode === 'compare' ? 'Scan target' : mode === 'verify' ? 'Backup' : 'Scanning'}
-            Icon={mode === 'compare' ? TargetIcon : SearchIcon}
-            color={mode === 'compare' ? 'var(--danger)' : 'var(--accent)'}
+            label={sideLabels ? sideLabels[1] : isMoveJob ? 'From' : isCompareJob ? 'Copy' : 'Searching'}
+            Icon={isCompareJob ? TargetIcon : SearchIcon}
+            color="var(--accent)"
             folders={targetFolders} scale={scale}
           />
         </div>

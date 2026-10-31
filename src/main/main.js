@@ -21,27 +21,40 @@ const os = require('os');
 const { DEFAULT_EXCLUSIONS } = require('./exclusions');
 const { buildSession } = require('./deleteGuard');
 const { checkRoots } = require('./system');
-const { createDeleteService } = require('./deleteService');
-const { getLocations } = require('./locations');
+const { createDeleteService, hashFull } = require('./deleteService');
+const { executeCopy } = require('./copyFiles');
+const { normaliseRoot, isInside } = require('./roots');
+const { getLocations, getRemovableDevices } = require('./locations');
+const { RECORD_NAME, serializeRecord, parseRecord, compareRecord } = require('./integrity');
 const { makeAppUrlCheck, hardenWebContents, denyAllPermissions } = require('./security');
+const { migrateUserData } = require('./migrate');
 
 const isDev = process.env.NODE_ENV === 'development';
 const DEV_URL = 'http://localhost:5173';
 const INDEX_PATH = path.join(__dirname, '../../dist/index.html');
 // Worker threads can't load from inside app.asar; package.json unpacks
 // src/main (the worker and the modules it requires) next to it.
-const WORKER_PATH = path.join(__dirname, 'scanWorker.js').replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`);
-// DFF_SMOKE=1: load the built page in a hidden window, run one real scan,
+const unpacked = (p) => p.replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`);
+const WORKER_PATH = unpacked(path.join(__dirname, 'scanWorker.js'));
+const INTEGRITY_WORKER_PATH = unpacked(path.join(__dirname, 'integrityWorker.js'));
+// HOLDFAST_SMOKE=1: load the built page in a hidden window, run one real scan,
 // print the result and exit (used by `npm run smoke` and CI).
-const SMOKE = process.env.DFF_SMOKE === '1';
+const SMOKE = process.env.HOLDFAST_SMOKE === '1';
 // The smoke test gets its own throwaway userData (cache, exclusions,
 // quarantine registry), so running it never touches the real app's state.
 // Electron keeps this folder locked while running, so it's emptied at the
 // start of the next run rather than at exit.
-const SMOKE_USERDATA = SMOKE ? path.join(os.tmpdir(), 'dff-smoke-userdata') : null;
+const SMOKE_USERDATA = SMOKE ? path.join(os.tmpdir(), 'holdfast-smoke-userdata') : null;
 if (SMOKE) {
   try { fs.rmSync(SMOKE_USERDATA, { recursive: true, force: true }); } catch { /* still locked by an old run */ }
   app.setPath('userData', SMOKE_USERDATA);
+} else {
+  // First start after the rename: copy data from the placeholder-name
+  // app-data folder (cache, exclusions, quarantine registry, settings).
+  try {
+    const m = migrateUserData({ appDataDir: app.getPath('appData'), userDataDir: app.getPath('userData') });
+    if (m.copied.length) console.log('[migrate] carried over:', m.copied.join(', '));
+  } catch (e) { console.error('[migrate] failed:', e.message); }
 }
 const isAppUrl = makeAppUrlCheck({ isDev, devUrl: DEV_URL, indexPath: INDEX_PATH });
 
@@ -62,6 +75,7 @@ app.on('web-contents-created', (_event, contents) => hardenWebContents(contents,
 let activeWorker = null;
 let finishActiveScan = null; // resolves the in-flight scan:start promise
 let lastSession = null; // deleteGuard session from the last completed scan
+let lastMove = null;    // Move to backup: plan, and what has been copied + verified
 let exclusionList = null; // loaded from userData on first use; see loadExclusions()
 
 function createWindow() {
@@ -127,7 +141,7 @@ app.whenReady().then(() => {
   });
 });
 
-// ── Smoke test (DFF_SMOKE=1) ─────────────────────────────────────────────────
+// ── Smoke test (HOLDFAST_SMOKE=1) ─────────────────────────────────────────────────
 // Proves a build works end to end without anyone looking at it: the page
 // renders under the sandbox + CSP with the preload bridge and without Node,
 // and the page drives the real IPC handlers — root checks, a compare scan (the
@@ -159,19 +173,27 @@ async function runSmoke() {
   // Drive the real preload bridge and IPC handlers from the page, the way the
   // UI does: root checks, a compare scan, a delete the guard must partly
   // refuse, then the quarantine listing and a restore.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dff-smoke-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'holdfast-smoke-'));
   const P = {
     dir,
     src: path.join(dir, 'src'),
     tgt: path.join(dir, 'tgt'),
     srcA: path.join(dir, 'src', 'a.jpg'),
     tgtCopy: path.join(dir, 'tgt', 'a copy.jpg'),
+    phone: path.join(dir, 'phone'),
+    backup: path.join(dir, 'backup'),
+    archive: path.join(dir, 'archive'),
   };
   try {
     fs.mkdirSync(P.src); fs.mkdirSync(P.tgt);
     fs.writeFileSync(P.srcA, 'same bytes');
     fs.writeFileSync(P.tgtCopy, 'same bytes');
     fs.writeFileSync(path.join(P.tgt, 'b.jpg'), 'different');
+    fs.mkdirSync(P.phone); fs.mkdirSync(P.backup);
+    fs.writeFileSync(path.join(P.phone, 'new.jpg'), 'only on the phone');
+    fs.writeFileSync(path.join(P.phone, 'dup.jpg'), 'already backed up');
+    fs.writeFileSync(path.join(P.backup, 'old.jpg'), 'already backed up');
+    fs.mkdirSync(P.archive);
 
     report.ipc = await win.webContents.executeJavaScript(`(async () => {
       const P = ${JSON.stringify(P)};
@@ -192,9 +214,37 @@ async function runSmoke() {
       out.restored = entry ? (await api.restoreFromQuarantine(entry.quarantinePath)).success === true : false;
       const ex = await api.getExclusions();
       out.exclusions = Array.isArray(ex) && ex.length > 0;
+
+      // Move to backup: scan, copy the new file, free up both local copies.
+      const mv = await api.startScan({ job: 'move', mode: 'compare', protectedFolders: [P.backup], targetFolders: [P.phone], filters: {}, confidence: 'thorough' });
+      out.movePlan = mv.move && mv.move.newFiles.length === 1 && mv.move.inBackup.length === 1;
+      const cp = await api.moveCopy({ layout: 'folders' });
+      out.moveCopied = cp.copied.length === 1 && cp.failed.length === 0;
+      const sum = await api.moveFreeUpSummary();
+      const fr = await api.moveFreeUp();
+      out.moveFreed = sum.files === 2 && fr.deleted.length === 2;
       return out;
     })()`).catch(e => ({ error: e.message }));
     report.ipc.filesBack = fs.existsSync(P.srcA) && fs.existsSync(P.tgtCopy);
+    report.ipc.moveLanded = fs.existsSync(path.join(P.backup, 'phone', 'new.jpg')) && !fs.existsSync(path.join(P.phone, 'new.jpg'));
+
+    // Archive: mirror the backup into the archive and write its integrity
+    // record; then flip one byte (keeping size and date) and re-check.
+    report.ipc.archive = await win.webContents.executeJavaScript(`(async () => {
+      const P = ${JSON.stringify(P)};
+      const api = window.electronAPI;
+      await api.startScan({ job: 'archive', mode: 'compare', protectedFolders: [P.archive], targetFolders: [P.backup], filters: {}, confidence: 'thorough' });
+      const cp = await api.moveCopy({ layout: 'folders' });
+      const rec = await api.archiveRecord();
+      return { copied: cp.copied.length, recorded: rec.files };
+    })()`).catch(e => ({ error: e.message }));
+    const victim = path.join(P.archive, 'backup', 'old.jpg');
+    if (fs.existsSync(victim)) {
+      const st = fs.statSync(victim);
+      const buf = fs.readFileSync(victim); buf[0] ^= 0xff; fs.writeFileSync(victim, buf);
+      fs.utimesSync(victim, st.atime, st.mtime);
+    }
+    report.ipc.archiveCheck = await win.webContents.executeJavaScript(`window.electronAPI.archiveVerify(${JSON.stringify(P.archive)}).then(r => r.counts)`).catch(e => ({ error: e.message }));
     report.scan = { groups: report.ipc.groups };
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -202,14 +252,17 @@ async function runSmoke() {
 
   const ipc = report.ipc || {};
   const ipcOk = ipc.overlapBlocked && ipc.groups === 1 && ipc.census && ipc.protectedRefused
-    && ipc.quarantined && ipc.listed && ipc.restored && ipc.exclusions && ipc.filesBack;
+    && ipc.quarantined && ipc.listed && ipc.restored && ipc.exclusions && ipc.filesBack
+    && ipc.movePlan && ipc.moveCopied && ipc.moveFreed && ipc.moveLanded
+    && ipc.archive && ipc.archive.copied === 2 && ipc.archive.recorded === 2
+    && ipc.archiveCheck && ipc.archiveCheck.corrupted === 1;
   const ok = !!(report.page && report.page.rendered && report.page.bridge && report.page.nodeHidden
     && (isDev || report.page.csp) && ipcOk && report.errors.length === 0);
   console.log('[smoke] ' + JSON.stringify(report));
   console.log(`[smoke] ${ok ? 'PASS' : 'FAIL'}`);
-  // Packaged Windows builds are GUI programs with no console; DFF_SMOKE_OUT
+  // Packaged Windows builds are GUI programs with no console; HOLDFAST_SMOKE_OUT
   // gives CI a file to read instead.
-  if (process.env.DFF_SMOKE_OUT) fs.writeFileSync(process.env.DFF_SMOKE_OUT, JSON.stringify({ ok, ...report }, null, 2));
+  if (process.env.HOLDFAST_SMOKE_OUT) fs.writeFileSync(process.env.HOLDFAST_SMOKE_OUT, JSON.stringify({ ok, ...report }, null, 2));
   return ok;
 }
 
@@ -237,10 +290,11 @@ handle('dialog:saveTextFile', async (_event, defaultName, content) => {
 
 // ── IPC: Drive / network locations (async — see locations.js) ─────────────────
 handle('fs:getLocations', async () => getLocations());
+handle('fs:listDevices', async () => getRemovableDevices());
 
 // ── IPC: Exclusion list (in-memory; persisted properly in Sprint 4) ──────────
-// Exclusions persist in userData/dff-exclusions.json (written atomically).
-const exclusionsPath = () => path.join(app.getPath('userData'), 'dff-exclusions.json');
+// Exclusions persist in userData/holdfast-exclusions.json (written atomically).
+const exclusionsPath = () => path.join(app.getPath('userData'), 'holdfast-exclusions.json');
 async function loadExclusions() {
   if (exclusionList) return exclusionList;
   try {
@@ -277,6 +331,7 @@ handle('scan:start', async (event, opts) => {
   // Enforced here as well as in the UI: overlapping or aliased roots can make
   // a protected file look like a deletable target copy.
   lastSession = null; // a new scan supersedes the old results
+  lastMove = null;
   const roots = await checkRoots(opts);
   if (roots.blocked.length > 0) {
     const reason = roots.blocked[0].reason;
@@ -307,12 +362,13 @@ handle('scan:start', async (event, opts) => {
         autoMarkRule: opts.autoMarkRule,
         exclusions,
         includeEmpty: !!opts.includeEmpty,
+        job: opts.job,
         confidence: opts.confidence, // quick | standard | thorough (worker defaults standard)
         concurrency: opts.concurrency, // undefined → worker defaults to 32
         platform: process.platform,
         rootExcludes: roots.excludeFromTarget,
         // Signature cache: (path, size, mtime) → hashes, reused across scans
-        cachePath: path.join(app.getPath('userData'), 'dff-signature-cache.json'),
+        cachePath: path.join(app.getPath('userData'), 'holdfast-signature-cache.json'),
       },
     });
     activeWorker = worker;
@@ -323,6 +379,13 @@ handle('scan:start', async (event, opts) => {
       } else if (msg.type === 'done') {
         activeWorker = null;
         lastSession = buildSession(msg.result, opts, process.platform);
+        // Transfer jobs: copy what's new from targetFolders into the first
+        // protected folder. Only Move to backup may free up the source:
+        // Import never changes the device, Archive never changes the backup.
+        lastMove = ['move', 'import', 'archive'].includes(opts.job) && msg.result.move
+          ? { job: opts.job, toRoot: (opts.protectedFolders || [])[0], fromRoots: opts.targetFolders || [], plan: msg.result.move,
+              copied: [], cleared: new Set(), allowFreeUp: opts.job === 'move' }
+          : null;
         resolve(msg.result);
       } else if (msg.type === 'cancelled') {
         activeWorker = null;
@@ -371,13 +434,128 @@ function getDeleteService() {
       // Smoke test: no Recycle Bin, and quarantine only inside the scan root
       // (its temp folder) — never the volume root or home folder.
       trash: SMOKE ? () => Promise.reject(new Error('smoke test: Recycle Bin disabled')) : (p) => shell.trashItem(p),
-      quarantineDirsFor: SMOKE ? (_p, file) => [path.join(file.root, '.dff-quarantine')] : undefined,
+      quarantineDirsFor: SMOKE ? (_p, file) => [path.join(file.root, '.holdfast-quarantine')] : undefined,
     });
   }
   return deleteService;
 }
 
 handle('files:cancelDelete', async () => { getDeleteService().cancel(); return true; });
+
+// ── IPC: Move to backup ──────────────────────────────────────────────────────
+// Copy the scan's new files into the backup (verified), then optionally clear
+// the local copies that are verified there. The renderer only picks the
+// layout and confirms; the file lists come from the main process's own plan.
+let moveCancel = false;
+handle('move:cancel', async () => { moveCancel = true; getDeleteService().cancel(); return true; });
+
+handle('move:copy', async (event, { layout } = {}) => {
+  if (!lastMove || !lastMove.toRoot) throw new Error('Scan results are out of date — run the scan again');
+  moveCancel = false;
+  const win = BrowserWindow.fromWebContents(event.sender);
+  const already = new Set(lastMove.copied.map(c => c.local));
+  const files = lastMove.plan.newFiles.filter(f => !already.has(f.path));
+  const results = await executeCopy(files, { toRoot: lastMove.toRoot, layout: layout === 'folders' ? 'folders' : 'date' }, {
+    exists: async (p) => { try { await fs.promises.access(p); return true; } catch { return false; } },
+    mkdir: (d) => fs.promises.mkdir(d, { recursive: true }),
+    copyFile: (a, b) => fs.promises.copyFile(a, b, fs.constants.COPYFILE_EXCL),
+    hash: hashFull,
+    rename: (a, b) => fs.promises.rename(a, b),
+    remove: (p) => fs.promises.rm(p, { force: true }),
+    setTimes: (p, iso) => fs.promises.utimes(p, new Date(iso), new Date(iso)),
+    isCancelled: () => moveCancel,
+    onProgress: (p) => win?.webContents.send('move:progress', { phase: 'copy', ...p }),
+  });
+  lastMove.copied.push(...results.copied);
+  return results;
+});
+
+// Local files that are verified to exist in the backup: the ones just copied,
+// plus the ones the scan found already there. Each must sit under a From
+// folder and not inside the backup; executeDeletion re-hashes both copies.
+function freeUpItems() {
+  if (!lastMove || !lastMove.allowFreeUp) return [];
+  const p = process.platform;
+  const toRoot = normaliseRoot(lastMove.toRoot, p);
+  const fromRoots = lastMove.fromRoots.map(r => normaliseRoot(r, p));
+  const under = (file, root) => { const n = normaliseRoot(file, p); return n === root || isInside(n, root); };
+  const ok = (local) => !lastMove.cleared.has(local) && fromRoots.some(r => under(local, r)) && !under(local, toRoot);
+  const byPath = new Map(lastMove.plan.newFiles.map(f => [f.path, f]));
+  const items = [];
+  for (const c of lastMove.copied) {
+    const f = byPath.get(c.local);
+    if (f && ok(c.local)) items.push({ path: c.local, file: f, counterpart: c.backup, counterpartFile: null });
+  }
+  for (const x of lastMove.plan.inBackup) {
+    if (ok(x.file.path)) items.push({ path: x.file.path, file: x.file, counterpart: x.backup, counterpartFile: null });
+  }
+  return items;
+}
+
+// ── IPC: Archive integrity record ─────────────────────────────────────────────
+// After an Archive copy, every file in the archive is hashed into
+// <archive>/holdfast-integrity.jsonl. Re-checking re-hashes every file (no
+// cache) and compares, to catch silent corruption, edits, and losses.
+let integrityWorker = null;
+function measureFolder(root, onProgress) {
+  return new Promise((resolve, reject) => {
+    if (integrityWorker) { try { integrityWorker.terminate(); } catch {} }
+    const w = new Worker(INTEGRITY_WORKER_PATH, { workerData: { root } });
+    integrityWorker = w;
+    w.on('message', (m) => {
+      if (m.type === 'progress') onProgress && onProgress(m);
+      else if (m.type === 'done') { integrityWorker = null; resolve({ entries: m.entries }); }
+      else if (m.type === 'cancelled') { integrityWorker = null; resolve({ cancelled: true }); }
+      else if (m.type === 'error') { integrityWorker = null; reject(new Error(m.message)); }
+    });
+    w.on('error', (e) => { integrityWorker = null; reject(e); });
+  });
+}
+handle('archive:cancel', async () => { if (integrityWorker) integrityWorker.postMessage({ type: 'cancel' }); return true; });
+
+handle('archive:record', async (event) => {
+  if (!lastMove || lastMove.job !== 'archive') throw new Error('Run Archive backup first');
+  const root = lastMove.toRoot;
+  const win = BrowserWindow.fromWebContents(event.sender);
+  const m = await measureFolder(root, (p) => win?.webContents.send('archive:progress', { phase: 'record', ...p }));
+  if (m.cancelled) return { cancelled: true };
+  const good = m.entries.filter(e => e.h);
+  const target = path.join(root, RECORD_NAME);
+  const tmp = target + '.tmp';
+  await fs.promises.writeFile(tmp, serializeRecord(good, { root }));
+  await fs.promises.rename(tmp, target);
+  return { files: good.length, bytes: good.reduce((a, e) => a + e.s, 0), unreadable: m.entries.filter(e => !e.h), path: target };
+});
+
+handle('archive:verify', async (event, root) => {
+  if (typeof root !== 'string' || !root) throw new Error('Choose an archive folder');
+  let record;
+  try { record = parseRecord(await fs.promises.readFile(path.join(root, RECORD_NAME), 'utf8')); }
+  catch (e) { throw new Error(e.code === 'ENOENT' ? `No integrity record in ${root} — archive it with Holdfast first` : e.message); }
+  const win = BrowserWindow.fromWebContents(event.sender);
+  const m = await measureFolder(root, (p) => win?.webContents.send('archive:progress', { phase: 'verify', ...p }));
+  if (m.cancelled) return { cancelled: true };
+  const r = compareRecord(record.entries, m.entries);
+  const cap = (a) => a.slice(0, 5000);
+  return {
+    root, recordedAt: record.header.createdAt, recordedFiles: record.entries.length,
+    ok: r.ok.length, corrupted: cap(r.corrupted), modified: cap(r.modified), missing: cap(r.missing), added: cap(r.added), unreadable: cap(r.unreadable),
+    counts: { corrupted: r.corrupted.length, modified: r.modified.length, missing: r.missing.length, added: r.added.length, unreadable: r.unreadable.length },
+  };
+});
+
+handle('move:freeUpSummary', async () => {
+  const items = freeUpItems();
+  return { files: items.length, bytes: items.reduce((a, i) => a + (i.file.size || 0), 0) };
+});
+
+handle('move:freeUp', async (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  const results = await getDeleteService().deleteVerifiedCopies(freeUpItems(),
+    (p) => win?.webContents.send('move:progress', { phase: 'free', ...p }));
+  for (const pth of results.deleted) lastMove && lastMove.cleared.add(pth);
+  return results;
+});
 
 handle('files:delete', async (event, payload) => {
   const win = BrowserWindow.fromWebContents(event.sender);
@@ -386,7 +564,7 @@ handle('files:delete', async (event, payload) => {
 
 // Signature cache. The worker writes a small .meta.json next to the cache, so
 // the Settings page never has to parse the (possibly 100 MB) cache itself.
-const sigCachePath = () => path.join(app.getPath('userData'), 'dff-signature-cache.json');
+const sigCachePath = () => path.join(app.getPath('userData'), 'holdfast-signature-cache.json');
 
 handle('cache:info', async () => {
   const p = sigCachePath();

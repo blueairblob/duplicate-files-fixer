@@ -24,12 +24,17 @@ const { isExcluded, compileExclusions } = require('./exclusions');
 // Compiled once per scan; matched only below each scan root.
 const EXCLUSIONS = compileExclusions(workerData.exclusions || []);
 const { normaliseRoot } = require('./roots');
-const { shouldIncludeFile, sizeCandidates, buildGroups, buildCensus, censusProblems, buildVerifyReport } = require('./scanCore');
+const { shouldIncludeFile, sizeCandidates, buildGroups, buildCensus, censusProblems } = require('./scanCore');
+const { buildMovePlan } = require('./movePlan');
 
 // Protected folders that sit inside a target root (normalised, see roots.js).
 // The target walk skips them so protected files are never seen as target files.
 const PLATFORM = workerData.platform || process.platform;
 const ROOT_EXCLUDES = new Set(workerData.rootExcludes || []);
+
+// The app's own quarantine folders are never scanned, whatever the user's
+// exclusion list says (the second name is from before the Holdfast rename).
+const APP_DIRS = new Set(['.holdfast-quarantine', '.dff-quarantine']);
 
 // File identity (device + inode). One physical file reached through two paths
 // (overlapping roots, a mapped drive and its UNC path, a junction) must be
@@ -133,10 +138,10 @@ function emitProgress(payload, force = false) {
 // Prints [scan-perf] lines to the terminal. One scan gives a full timing
 // picture: effective pool width, thread pool size, per-phase rate and avg
 // per-op latency — enough to pinpoint any serialization without guessing.
-// Verbose tracing is opt-in: `set DFF_PERF=1` (PowerShell: $env:DFF_PERF=1)
+// Verbose tracing is opt-in: `set HOLDFAST_PERF=1` (PowerShell: $env:HOLDFAST_PERF=1)
 // before `npm run dev`. It found the NAS boundary-hash bottleneck; leaving it
 // on by default buries real errors under thousands of lines per scan.
-const PERF_VERBOSE = process.env.DFF_PERF === '1';
+const PERF_VERBOSE = process.env.HOLDFAST_PERF === '1';
 
 const perf = { phase: null, t0: 0, ops: 0, phases: [] };
 function perfPhase(name, plannedOps) {
@@ -317,6 +322,7 @@ async function walkRoots(roots, label, filters, allFiles, warnings, counter) {
       const fullPath = path.join(dir, entry.name);
       if (isExcluded(fullPath, EXCLUSIONS, root)) continue;
       if (entry.isDirectory()) {
+        if (APP_DIRS.has(entry.name.toLowerCase())) continue;
         if (label === 'target' && ROOT_EXCLUDES.has(normaliseRoot(fullPath, PLATFORM))) continue;
         queue.push({ dir: fullPath, root });
       } else if (entry.isFile() && shouldIncludeFile(fullPath, filters)) {
@@ -385,7 +391,7 @@ async function walkRoots(roots, label, filters, allFiles, warnings, counter) {
 
 async function run() {
   perfPhase('walk');
-  const { mode, protectedFolders, targetFolders, filters, autoMarkRule, includeEmpty } = workerData;
+  const { mode, job, protectedFolders, targetFolders, filters, autoMarkRule, includeEmpty } = workerData;
 
   const warnings = [];
   const counter  = { walked: 0, hashed: 0 };
@@ -398,7 +404,7 @@ async function run() {
   // ── Pass 1: walk all folders, collect file metadata (cheap) ──────────────
   // Protected roots finish before target roots start: identity dedupe keeps
   // the first sighting, and it must be the protected one.
-  if (mode === 'compare' || mode === 'verify') {
+  if (mode === 'compare') {
     await walkRoots(protectedFolders || [], 'protected', filters || {}, allFiles, warnings, counter);
     if (!cancelled) await walkRoots(targetFolders || [], 'target', filters || {}, allFiles, warnings, counter);
   } else {
@@ -516,10 +522,20 @@ async function run() {
   }
 
   // ── Duplicate groups (compare / simple modes) ────────────────────────────
-  const groups = mode === 'verify' ? [] : buildGroups(fileMap, mode, autoMarkRule);
+  const groups = buildGroups(fileMap, mode, autoMarkRule);
 
-  // ── Verify report: is every source file in the backup? ───────────────────
-  const verifyReport = mode === 'verify' ? buildVerifyReport(nonEmptyFiles, fileMap, unreadable) : null;
+  // ── Move to backup: what to copy, what's already there ───────────────────
+  let move = null;
+  if ((job === 'move' || job === 'import' || job === 'archive') && mode === 'compare') {
+    const slim = f => ({ path: f.path, name: f.name, size: f.size, modified: f.modified, id: f.id, root: f.root, ext: f.ext });
+    const plan = buildMovePlan(nonEmptyFiles, fileMap, unreadable);
+    move = {
+      newFiles: plan.newFiles.map(slim),
+      inBackup: plan.inBackup.map(x => ({ file: slim(x.file), backup: x.backup })),
+      unreadable: plan.unreadable.map(slim),
+    };
+  }
+
 
   // ── Empty file groups ─────────────────────────────────────────────────────
   const emptyGroups = (includeEmpty && emptyFiles.length > 0)
@@ -545,8 +561,8 @@ async function run() {
       warnings,
       mode,
       confidence: CONFIDENCE,
-      verifyReport,
       census,
+      move,
     },
   });
 }

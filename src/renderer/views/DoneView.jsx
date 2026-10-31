@@ -140,7 +140,7 @@ export default function DoneView({ deleteResult, onScanAgain }) {
           maxWidth: 440, textAlign: 'center',
         }}>
           🛡 {quarantined.length.toLocaleString()} file{quarantined.length !== 1 ? 's' : ''} couldn't go to the Recycle Bin (network drives
-          don't have one) and {quarantined.length !== 1 ? 'were' : 'was'} moved to a .dff-quarantine folder on the same drive instead.
+          don't have one) and {quarantined.length !== 1 ? 'were' : 'was'} moved to a .holdfast-quarantine folder on the same drive instead.
           Restore {quarantined.length !== 1 ? 'them' : 'it'} from Quarantine in the sidebar.
         </div>
       )}

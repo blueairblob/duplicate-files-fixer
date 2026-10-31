@@ -66,7 +66,7 @@ function EmptyFilesCard({ files, scale }) {
 // One duplicate group. Memoized: `markedMask` ('1'/'0' per file) changes only
 // for the group whose selection changed, so ticking a file re-renders one
 // card instead of every card on the page.
-const GroupCard = React.memo(function GroupCard({ group, markedMask, isExpanded, matchWord, scale, onToggleExpand, onToggleFile }) {
+const GroupCard = React.memo(function GroupCard({ group, markedMask, isExpanded, matchWord, keepWord, scale, onToggleExpand, onToggleFile }) {
   const groupMarked = markedMask.split('').filter(c => c === '1').length;
   const TypeIcon = typeIconFor(group.files[0].ext);
   return (
@@ -117,7 +117,7 @@ const GroupCard = React.memo(function GroupCard({ group, markedMask, isExpanded,
             role="checkbox"
             aria-checked={isMarked}
             aria-disabled={isProtected || undefined}
-            aria-label={`${isProtected ? 'Protected, can never be deleted: ' : 'Delete '}${file.path}`}
+            aria-label={`${isProtected ? `${keepWord}, never deleted: ` : 'Delete '}${file.path}`}
             tabIndex={isProtected ? -1 : 0}
             onKeyDown={e => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); onToggleFile(file.path, isProtected); } }}
             onClick={() => onToggleFile(file.path, isProtected)}
@@ -131,7 +131,7 @@ const GroupCard = React.memo(function GroupCard({ group, markedMask, isExpanded,
             onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
           >
             {isProtected ? (
-              <span title="Protected — can never be deleted" style={{ display: 'flex', flexShrink: 0 }}>
+              <span title={`${keepWord} — never deleted`} style={{ display: 'flex', flexShrink: 0 }}>
                 <ShieldIcon size={scale(16)} color="var(--accent)" />
               </span>
             ) : (
@@ -155,7 +155,7 @@ const GroupCard = React.memo(function GroupCard({ group, markedMask, isExpanded,
 
             {isProtected && (
               <span style={{ fontSize: 'var(--fs-caption)', color: 'var(--accent)', flexShrink: 0 }}>
-                Protected
+                {keepWord}
               </span>
             )}
             <span style={{ fontSize: 'var(--fs-caption)', color: 'var(--text-muted)', flexShrink: 0, textAlign: 'right', minWidth: scale(120) }}>
@@ -200,6 +200,10 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
     () => (selSet ? allGroups.filter(g => g.files.some(f => selSet.has(f.path))) : allGroups),
     [allGroups, selSet]
   );
+
+  // Kept files: the Original (Compare folders) or a Keep folder (Find duplicates).
+  const isCompareJob = scanConfig?.job ? scanConfig.job === 'compare' : mode === 'compare';
+  const keepWord = isCompareJob ? 'Original' : 'Keep folder';
 
   // Wording honesty: only a thorough scan has byte-for-byte proven identity.
   const matchWord = confidence === 'thorough' ? 'identical' : 'matching';
@@ -384,13 +388,13 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
 
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: scale(8) }}>
           {mode === 'compare' && (
-            <span title="Files in the protected source can never be deleted" style={{
+            <span title={`Files in ${isCompareJob ? 'the Original' : 'Keep folders'} are never deleted`} style={{
               display: 'inline-flex', alignItems: 'center', gap: scale(5),
               fontSize: 'var(--fs-caption)', color: 'var(--accent)',
               background: 'var(--accent-tint)', borderRadius: scale(12),
               padding: `${scale(3)}px ${scale(10)}px`,
             }}>
-              <ShieldIcon size={scale(13)} /> Protected source
+              <ShieldIcon size={scale(13)} /> {isCompareJob ? 'Original never changed' : 'Keep folders never changed'}
             </span>
           )}
           <div style={{ position: 'relative' }}>
@@ -420,7 +424,7 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
             <GroupCard key={group.id} group={group}
               markedMask={group.files.map(f => (marked.has(f.path) ? '1' : '0')).join('')}
               isExpanded={expanded.has(group.id)}
-              matchWord={matchWord} scale={scale}
+              matchWord={matchWord} keepWord={keepWord} scale={scale}
               onToggleExpand={toggleExpand} onToggleFile={toggleFile} />
           ))}
           {filteredGroups.length > visibleGroups.length && (
@@ -496,7 +500,7 @@ export default function ResultsView({ scanResult, scanConfig, onDeleteComplete, 
           </div>
 
           <p style={{ fontSize: 'var(--fs-caption)', color: 'var(--text-muted)', lineHeight: 1.5, margin: 0 }}>
-            {mode === 'compare' && 'Protected files can never be deleted. '}
+            {mode === 'compare' && `${isCompareJob ? 'Files in the Original' : 'Files in Keep folders'} are never deleted. `}
             Each file is re-checked against its kept copy{confidence !== 'thorough' && ' byte-for-byte'}, then moved to the
             Recycle Bin or a recovery folder on the same drive. Nothing is permanently deleted.
           </p>

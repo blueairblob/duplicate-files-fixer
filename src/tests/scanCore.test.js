@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   shouldIncludeFile, sizeCandidates, sortForKeep, buildGroups,
-  buildCensus, censusProblems, buildVerifyReport,
+  buildCensus, censusProblems,
 } from '../main/scanCore.js';
 
 // Tests the real scan logic (src/main/scanCore.js) used by the worker.
@@ -118,28 +118,27 @@ describe('buildCensus', () => {
   });
 });
 
-describe('buildVerifyReport — is every SOURCE file in the BACKUP?', () => {
-  it('reports source files missing from the backup as the risk', () => {
+describe('buildCensus answers the backup question (Compare folders verdict)', () => {
+  it('lists Original files missing from the Copy as sourceOnly', () => {
     const s1 = src('/s/kept.jpg'), s2 = src('/s/lost.jpg');
     const b1 = file('/b/kept.jpg', { root: '/b' }), b2 = file('/b/extra.jpg', { root: '/b' });
-    const r = buildVerifyReport([s1, s2, b1, b2], mapOf([s1, b1]));
-    expect(r.missing.map(f => f.path)).toEqual(['/s/lost.jpg']);
-    expect(r.backedUp.map(m => [m.source.path, m.backup.path])).toEqual([['/s/kept.jpg', '/b/kept.jpg']]);
-    expect(r.backupOnly.map(f => f.path)).toEqual(['/b/extra.jpg']);
-    expect(r.summary.missingCount).toBe(1);
+    const c = buildCensus([s1, s2, b1, b2], mapOf([s1, b1]), ['/s'], ['/b']);
+    expect(c.sourceOnly.list.map(f => f.path)).toEqual(['/s/lost.jpg']);
+    expect(c.matched.targetFiles).toBe(1);
+    expect(c.targetOnly.list.map(f => f.path)).toEqual(['/b/extra.jpg']);
   });
 
-  it('does not report "all backed up" when the backup holds only a subset', () => {
+  it('does not report everything present when the Copy holds only a subset', () => {
     const sources = Array.from({ length: 5 }, (_, i) => src(`/s/${i}.jpg`));
     const backup = file('/b/0.jpg', { root: '/b' });
-    const r = buildVerifyReport([...sources, backup], mapOf([sources[0], backup]));
-    expect(r.summary.missingCount).toBe(4);
+    const c = buildCensus([...sources, backup], mapOf([sources[0], backup]), ['/s'], ['/b']);
+    expect(c.sourceOnly.files).toBe(4);
   });
 
-  it('lists unreadable files separately rather than as missing', () => {
+  it('counts unreadable Original files separately, not as missing', () => {
     const s1 = src('/s/locked.jpg');
-    const r = buildVerifyReport([s1], new Map(), new Set(['/s/locked.jpg']));
-    expect(r.missing).toEqual([]);
-    expect(r.summary.unreadableSourceCount).toBe(1);
+    const c = buildCensus([s1], new Map(), ['/s'], ['/b'], new Set(['/s/locked.jpg']));
+    expect(c.sourceOnly.files).toBe(0);
+    expect(c.unreadable.sourceFiles).toBe(1);
   });
 });

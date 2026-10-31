@@ -7,7 +7,7 @@
 //   npx electron tools/phase-a-check.js <mapped-root> <unc-root>
 //   e.g. npx electron tools/phase-a-check.js Z:\ \\192.168.0.101\public
 //
-// It only touches files it creates: a dff-phase-a-<stamp> folder on the share
+// It only touches files it creates: a holdfast-phase-a-<stamp> folder on the share
 // and in %TEMP%. Everything is removed at the end, except one test file it
 // sends to the Windows Recycle Bin (step 8) — empty the bin to remove it.
 
@@ -22,7 +22,9 @@ const { Worker } = require('worker_threads');
 const SRC = path.join(__dirname, '..', 'src', 'main');
 const { checkRoots } = require(path.join(SRC, 'system'));
 const { buildSession, planDeletion } = require(path.join(SRC, 'deleteGuard'));
-const { createDeleteService, statForDelete } = require(path.join(SRC, 'deleteService'));
+const { createDeleteService, statForDelete, hashFull } = require(path.join(SRC, 'deleteService'));
+const { executeCopy } = require(path.join(SRC, 'copyFiles'));
+const { serializeRecord, parseRecord, compareRecord } = require(path.join(SRC, 'integrity'));
 
 const [mappedRoot, uncRoot] = process.argv.slice(2).filter(a => !a.startsWith('--'));
 if (!mappedRoot || !uncRoot) {
@@ -30,7 +32,7 @@ if (!mappedRoot || !uncRoot) {
   process.exit(2);
 }
 
-const STAMP = `dff-phase-a-${Date.now()}`;
+const STAMP = `holdfast-phase-a-${Date.now()}`;
 const NAS = path.join(mappedRoot, STAMP);
 const NAS_UNC = path.join(uncRoot, STAMP);
 const LOCAL = path.join(os.tmpdir(), STAMP);
@@ -47,14 +49,14 @@ function info(step, detail) {
 }
 
 const content = {};
-for (const k of ['A', 'B', 'C', 'D', 'X']) content[k] = crypto.randomBytes(200 * 1024 + k.charCodeAt(0));
+for (const k of ['A', 'B', 'C', 'D', 'E', 'X']) content[k] = crypto.randomBytes(200 * 1024 + k.charCodeAt(0));
 async function put(p, key) { await fsp.mkdir(path.dirname(p), { recursive: true }); await fsp.writeFile(p, content[key]); return p; }
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 function runScan(workerData) {
   return new Promise((resolve, reject) => {
     const w = new Worker(path.join(SRC, 'scanWorker.js'), {
-      workerData: { filters: {}, exclusions: [], cachePath: path.join(USERDATA, 'dff-signature-cache.json'), platform: process.platform, ...workerData },
+      workerData: { filters: {}, exclusions: [], cachePath: path.join(USERDATA, 'holdfast-signature-cache.json'), platform: process.platform, ...workerData },
     });
     w.on('message', (m) => {
       if (m.type === 'done') { resolve(m.result); w.terminate(); }
@@ -128,7 +130,7 @@ async function main() {
   const qb1 = q.find(e => e.originalPath === b1);
   check('3  NAS files quarantined, not recycled', d3.quarantined.length === 2 && d3.trashed.length === 0,
     `quarantined=${d3.quarantined.length} trashed=${d3.trashed.length} skipped=${JSON.stringify(d3.skipped)} failed=${JSON.stringify(d3.failed)}`);
-  check('3  quarantine folder is on the same drive', qa1 && path.dirname(qa1.quarantinePath).toLowerCase() === path.join(mappedRoot, '.dff-quarantine').toLowerCase(),
+  check('3  quarantine folder is on the same drive', qa1 && path.dirname(qa1.quarantinePath).toLowerCase() === path.join(mappedRoot, '.holdfast-quarantine').toLowerCase(),
     qa1 && qa1.quarantinePath);
   check('3  freed bytes counted', d3.freedBytes === content.A.length + content.B.length, `${d3.freedBytes}`);
 
@@ -170,15 +172,75 @@ async function main() {
   const d8 = xCopy ? await svc.deleteFiles(s7, { files: [{ path: xCopy }] }) : { trashed: [] };
   check('8  local duplicate goes to the Recycle Bin', d8.trashed.length === 1 && !(await exists(xCopy)), `${xCopy} → ${JSON.stringify({ trashed: d8.trashed, quarantined: d8.quarantined, failed: d8.failed })}`);
 
-  // ── 9. Verify: is every source file in the backup? (Phase B) ──
+  // ── 9. Compare folders: is every Original file in the Copy? ──
   // Source = local photos (a, b, c, d-renamed); backup = NAS dupes. c1 was
   // overwritten in step 5 and b1 is still quarantined, so b and c are missing.
   await put(path.join(LOCAL, 'photos', 'raw.cr2'), 'X');       // never backed up, non-allowlisted type
-  const v = await runScan({ mode: 'verify', protectedFolders: [path.join(LOCAL, 'photos')], targetFolders: [dupes], confidence: 'thorough' });
-  const missing = v.verifyReport.missing.map(f => path.basename(f.path)).sort();
-  check('9  verify lists source files missing from the backup (incl. .cr2)',
+  const v = await runScan({ mode: 'compare', protectedFolders: [path.join(LOCAL, 'photos')], targetFolders: [dupes], confidence: 'thorough' });
+  const missing = v.census.sourceOnly.list.map(f => path.basename(f.path)).sort();
+  check('9  Compare folders lists Original files missing from the Copy (incl. .cr2)',
     JSON.stringify(missing) === JSON.stringify(['b.jpg', 'c.jpg', 'raw.cr2']),
-    `missing=${missing.join(', ')} backedUp=${v.verifyReport.backedUp.length} backupOnly=${v.verifyReport.backupOnly.length}`);
+    `missing=${missing.join(', ')} inBoth=${v.census.matched.targetFiles} onlyInCopy=${v.census.targetOnly.files}`);
+
+  // ── 10. Move to backup: phone copy → NAS, verified, then free up ──
+  // p-new is new; p-dup has the same content as keep/a.jpg already on the NAS.
+  await put(path.join(LOCAL, 'phone', 'DCIM', 'p-new.jpg'), 'E');
+  await put(path.join(LOCAL, 'phone', 'DCIM', 'p-dup.jpg'), 'A');
+  const mv = await runScan({ mode: 'compare', job: 'move', protectedFolders: [NAS], targetFolders: [path.join(LOCAL, 'phone')], confidence: 'thorough' });
+  const newNames = mv.move.newFiles.map(f => path.basename(f.path));
+  const inNames = mv.move.inBackup.map(x => path.basename(x.file.path));
+  check('10 move: only the new file is planned for copying', JSON.stringify(newNames) === '["p-new.jpg"]' && JSON.stringify(inNames) === '["p-dup.jpg"]',
+    `new=${newNames.join(',')} inBackup=${inNames.join(',')}`);
+  const cp = await executeCopy(mv.move.newFiles, { toRoot: NAS, layout: 'date' }, {
+    exists: exists,
+    mkdir: (d) => fsp.mkdir(d, { recursive: true }),
+    copyFile: (a, b) => fsp.copyFile(a, b, fs.constants.COPYFILE_EXCL),
+    hash: hashFull,
+    rename: (a, b) => fsp.rename(a, b),
+    remove: (p) => fsp.rm(p, { force: true }),
+    setTimes: (p, iso) => fsp.utimes(p, new Date(iso), new Date(iso)),
+  });
+  const landed = cp.copied[0] && cp.copied[0].backup;
+  check('10 move: copied to the NAS by Year/Month and verified',
+    cp.copied.length === 1 && landed && /[\\/]\d{4}[\\/]\d{2}[\\/]p-new\.jpg$/.test(landed) && (await hashFull(landed)) === (await hashFull(mv.move.newFiles[0].path)),
+    landed || JSON.stringify(cp.failed));
+  // Free up: quarantine inside the temp phone folder (no Recycle Bin clutter).
+  const svcLocal = createDeleteService({ userDataDir: USERDATA, homeDir: os.homedir(), trash: () => Promise.reject(new Error('test: no Recycle Bin')),
+    quarantineDirsFor: () => [path.join(LOCAL, 'phone', '.holdfast-quarantine')] });
+  const freeItems = [
+    ...cp.copied.map(c => ({ path: c.local, file: mv.move.newFiles.find(f => f.path === c.local), counterpart: c.backup, counterpartFile: null })),
+    ...mv.move.inBackup.map(x => ({ path: x.file.path, file: x.file, counterpart: x.backup, counterpartFile: null })),
+  ];
+  const fr = await svcLocal.deleteVerifiedCopies(freeItems);
+  check('10 move: free-up removed both local copies, backup untouched',
+    fr.deleted.length === 2 && !(await exists(path.join(LOCAL, 'phone', 'DCIM', 'p-new.jpg'))) && (await exists(landed)),
+    JSON.stringify({ deleted: fr.deleted.length, skipped: fr.skipped, failed: fr.failed }));
+
+  // ── 11. Archive backup: NAS → local archive, integrity record, re-check ──
+  const archiveDir = path.join(LOCAL, 'archive');
+  await fsp.mkdir(archiveDir, { recursive: true });
+  const ar = await runScan({ mode: 'compare', job: 'archive', protectedFolders: [archiveDir], targetFolders: [dupes], confidence: 'thorough' });
+  const acp = await executeCopy(ar.move.newFiles, { toRoot: archiveDir, layout: 'folders' }, {
+    exists, mkdir: (d) => fsp.mkdir(d, { recursive: true }), copyFile: (a, b) => fsp.copyFile(a, b, fs.constants.COPYFILE_EXCL),
+    hash: hashFull, rename: (a, b) => fsp.rename(a, b), remove: (p) => fsp.rm(p, { force: true }),
+    setTimes: (p, iso) => fsp.utimes(p, new Date(iso), new Date(iso)),
+  });
+  const measure = () => new Promise((resolve, reject) => {
+    const w = new Worker(path.join(SRC, 'integrityWorker.js'), { workerData: { root: archiveDir } });
+    w.on('message', (m) => { if (m.type === 'done') { resolve(m.entries); w.terminate(); } else if (m.type === 'error') reject(new Error(m.message)); });
+    w.on('error', reject);
+  });
+  const recorded = parseRecord(serializeRecord(await measure())).entries;
+  const victim = acp.copied[0] && acp.copied[0].backup;
+  if (victim) {
+    const st = await fsp.stat(victim);
+    const buf = await fsp.readFile(victim); buf[100] ^= 0xff; await fsp.writeFile(victim, buf);
+    await fsp.utimes(victim, st.atime, st.mtime);
+  }
+  const rc = compareRecord(recorded, await measure());
+  check('11 archive: copied from the NAS, recorded, and a flipped byte is caught',
+    acp.copied.length === ar.move.newFiles.length && acp.copied.length > 0 && rc.corrupted.length === 1 && rc.ok.length === recorded.length - 1,
+    `archived=${acp.copied.length} recorded=${recorded.length} corrupted=${rc.corrupted.length} ok=${rc.ok.length}`);
 
   // Leftover quarantined test file (b1) — removed in cleanup.
   return { leftovers: [qb1 && qb1.quarantinePath].filter(Boolean), ourQuarantinePaths: [qa1, qb1].filter(Boolean).map(e => e.quarantinePath) };
@@ -188,7 +250,7 @@ async function cleanup(leftovers, ourQuarantinePaths = []) {
   const ours = new Set(ourQuarantinePaths);
   for (const p of leftovers) await fsp.rm(p, { force: true }).catch(() => {});
   // Remove the share's quarantine folder only if everything in it is ours.
-  const qdir = path.join(mappedRoot, '.dff-quarantine');
+  const qdir = path.join(mappedRoot, '.holdfast-quarantine');
   try {
     const entries = await fsp.readdir(qdir);
     const manifest = await fsp.readFile(path.join(qdir, 'manifest.jsonl'), 'utf8').catch(() => '');
